@@ -300,7 +300,7 @@ func acctBegin(w io.Writer, req *radius.Packet) {
 		return
 	}
 
-	if e := model.SessionAdd(sess, userLimits.ID, nasIp, assignedIp, clientIp); e != nil {
+	if e := model.SessionAdd(config.DB, sess, userLimits.ID, nasIp, assignedIp, clientIp); e != nil {
 		config.Log.Printf("acct.begin e=%s", e.Error())
 		return
 	}
@@ -382,11 +382,11 @@ func acctStop(w io.Writer, req *radius.Packet) {
 		config.Log.Printf("acct.update e=" + e.Error())
 		return
 	}
-	if e := model.SessionLog(txn, sess, user, nasIp); e != nil {
+	if e := model.SessionLog(txn, sess, userID, nasIp); e != nil {
 		config.Log.Printf("acct.update e=" + e.Error())
 		return
 	}
-	if e := model.SessionRemove(txn, sess, user, nasIp); e != nil {
+	if e := model.SessionRemove(txn, sess, userID, nasIp); e != nil {
 		config.Log.Printf("acct.update e=" + e.Error())
 		return
 	}

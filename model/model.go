@@ -26,7 +26,7 @@ func UserID(db *sql.DB, user string) (int64, error) {
 	var userID int64
 	e := db.QueryRow(
 		config.PlaceholderFormat(`SELECT
-			id,
+			id
 		FROM
 			users
 		WHERE
@@ -43,20 +43,21 @@ func Auth(db *sql.DB, user string) (User, error) {
 	u := User{}
 	e := db.QueryRow(
 		config.PlaceholderFormat(`SELECT
-			id,
-			username,
-			password,
-			block_remaining,
-			active_until,
+			users.id,
+			users.username,
+			users.password,
+			users.block_remaining,
+			users.active_until,
 			1,
-			max_sessions,
-			dedicated_address,
+			users.max_sessions,
+			users.dedicated_address,
 			CONCAT(products.ratelimit_up, products.ratelimit_unit, '/', products.ratelimit_down, products.ratelimit_unit),
-			dns.one, dns.two
+			dns.one, 
+			dns.two
 		FROM
 			users
 		JOIN
-			product
+			products
 		ON
 			users.product_id = products.id
 		LEFT JOIN
@@ -110,7 +111,7 @@ func SessionCount(db *sql.DB, user string) (uint32, error) {
 		  	SELECT * 
 		  	FROM users 
 		  	WHERE 
-		  		  sessions.user_id == users.id 
+		  		  sessions.user_id = users.id 
 		  		AND 
 		  		  users.username = ?
 		  )
@@ -150,9 +151,9 @@ func affectCheck(res sql.Result, expect int64, errMsg error) error {
 	return nil
 }
 
-func SessionAdd(sessionID string, user int64, nasIp, assignedIp, clientIp string) error {
+func SessionAdd(db *sql.DB, sessionID string, user int64, nasIP, assignedIP, clientIP string) error {
 	exists := false
-	e := config.DB.QueryRow(
+	e := db.QueryRow(
 		config.PlaceholderFormat(`SELECT
 			1
 		FROM
@@ -163,7 +164,7 @@ func SessionAdd(sessionID string, user int64, nasIp, assignedIp, clientIp string
 			session_id = ?
 		AND
 			nas_address = ?`),
-		user, sessionID, nasIp,
+		user, sessionID, nasIP,
 	).Scan(&exists)
 	if e != nil && e != sql.ErrNoRows {
 		return e
@@ -173,14 +174,22 @@ func SessionAdd(sessionID string, user int64, nasIp, assignedIp, clientIp string
 		return nil
 	}
 
-	res, e := config.DB.Exec(
-		config.PlaceholderFormat(`INSERT INTO
-			sessions
-		(session_id, user, time_added, nas_address, assigned_address, client_address, bytes_in, bytes_out, packets_in, packets_out, session_time)
-		VALUES
-		(?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0)`),
-		sessionID, user, time.Now().Unix(), nasIp, assignedIp, clientIp,
-	)
+	res, e := db.Exec(
+		config.PlaceholderFormat(`INSERT INTO sessions (
+		  	session_id, 
+				user_id,  
+				nas_address, 
+				assigned_address, 
+				client_address, 
+				bytes_in, 
+				bytes_out, 
+				packets_in, 
+				packets_out, 
+				session_time,
+				created_at
+			)
+		VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?)`),
+		sessionID, user, nasIP, assignedIP, clientIP, time.Now())
 	if e != nil {
 		return e
 	}
@@ -219,56 +228,56 @@ func SessionUpdate(txn *sql.Tx, s Session) error {
 
 }
 
-func SessionRemove(txn *sql.Tx, sessionId, user, nasIp string) error {
+func SessionRemove(txn *sql.Tx, sessionID string, user int64, nasIP string) error {
 	res, e := txn.Exec(
 		config.PlaceholderFormat(`DELETE FROM
-			session
+			sessions
 		WHERE
 			session_id = ?
 		AND
-			user = ?
+			user_id = ?
 		AND
-			nas_ip = ?`),
-		sessionId, user, nasIp,
+			nas_address = ?`),
+		sessionID, user, nasIP,
 	)
 	if e != nil {
 		return e
 	}
 	return affectCheck(res, 1, fmt.Errorf(
 		"session.remove fail for sess=%s",
-		sessionId,
+		sessionID,
 	))
 	return nil
 }
 
 // Copy session to log
-func SessionLog(txn *sql.Tx, sessionId string, user string, nasIp string) error {
+func SessionLog(txn *sql.Tx, sessionID string, user int64, nasIP string) error {
 	res, e := txn.Exec(
 		config.PlaceholderFormat(`INSERT INTO
-			session_log
-			(assigned_ip, bytes_in, bytes_out, client_ip,
-			nas_ip, packets_in, packets_out, session_id,
-			session_time, user, time_added)
+			session_log_records
+			(assigned_address, bytes_in, bytes_out, client_address,
+			nas_address, packets_in, packets_out, session_id,
+			session_time, user_id, created_at)
 		SELECT
-			assigned_ip, bytes_in, bytes_out, client_ip,
-			nas_ip, packets_in, packets_out, session_id,
-			session_time, user, time_added
+			assigned_address, bytes_in, bytes_out, client_address,
+			nas_address, packets_in, packets_out, session_id,
+			session_time, user_id, created_at
 		FROM
-			session
+			sessions
 		WHERE
 			session_id = ?
 		AND
-			user = ?
+			user_id = ?
 		AND
-			nas_ip = ?`),
-		sessionId, user, nasIp,
+			nas_address = ?`),
+		sessionID, user, nasIP,
 	)
 	if e != nil {
 		return e
 	}
 	return affectCheck(res, 1, fmt.Errorf(
 		"session.log fail for sess=%s",
-		sessionId,
+		sessionID,
 	))
 }
 
