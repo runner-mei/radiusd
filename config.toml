@@ -1,4 +1,5 @@
-Dsn = "user:password@/dbname?strict=true&charset=utf8mb4,utf8"
+Drv = "postgres"
+Dsn = "host=127.0.0.1 dbname=tpt_models_test user=tpt password=extreme sslmode=disable"
 ControlListen="127.0.0.1:8124"
 
 [listen]

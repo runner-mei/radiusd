@@ -2,52 +2,27 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"net"
+	"log"
 	"net/http"
-	"radiusd/config"
-	"github.com/itshosted/webutils/httpd"
-	"github.com/itshosted/webutils/middleware"
-	"github.com/itshosted/webutils/muxdoc"
-	"github.com/itshosted/webutils/ratelimit"
+
+	"github.com/runner-mei/radiusd/config"
 )
 
-var (
-	mux muxdoc.MuxDoc
-	ln net.Listener
-)
+var server *http.Server
 
 func Control() {
-	mux.Title = "RadiusdD API"
-	mux.Desc = "Administrative API"
-	mux.Add("/", doc, "This documentation")
-	mux.Add("/shutdown", shutdown, "Finish jobs and close application")
-	mux.Add("/verbose", verbose, "Toggle verbosity-mode")
+	http.HandleFunc("/shutdown", shutdown)
+	http.HandleFunc("/verbose", verbose)
 
-	middleware.Add(ratelimit.Use(5, 5))
-	http.Handle("/", middleware.Use(mux.Mux))
-
-	var e error
-	server := &http.Server{Addr: config.C.ControlListen, Handler: nil}
-	ln, e = net.Listen("tcp", server.Addr)
+	server = &http.Server{Addr: config.C.ControlListen}
+	e := server.ListenAndServe()
 	if e != nil {
-		panic(e)
-	}
-	if config.Verbose {
-		config.Log.Printf("httpd listening on " + config.C.ControlListen)
-	}
-	if e := server.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)}); e != nil {
 		if !config.Stopping {
 			panic(e)
 		}
 	}
-}
-
-// Return API Documentation (paths)
-func doc(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(404)
-	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(mux.String()))
 }
 
 // Finish pending jobs and close application
@@ -61,13 +36,14 @@ func shutdown(w http.ResponseWriter, r *http.Request) {
 
 	config.Log.Printf("Disconnecting")
 	config.Stopping = true
-
-	if e := ln.Close(); e != nil {
-		if _, e := w.Write([]byte(fmt.Sprintf(`{"success": false, "msg": "Error stopping HTTP-listener"}`))); e != nil {
-			config.Log.Printf("control: " + e.Error())
-			return
+	/*
+		if e := server.Close(); e != nil {
+			if _, e := w.Write([]byte(fmt.Sprintf(`{"success": false, "msg": "Error stopping HTTP-listener"}`))); e != nil {
+				config.Log.Printf("control: " + e.Error())
+				return
+			}
 		}
-	}
+	*/
 	for _, sock := range config.Sock {
 		if e := sock.Close(); e != nil {
 			if _, e := w.Write([]byte(fmt.Sprintf(`{"success": false, "msg": "Error stopping listener"}`))); e != nil {
@@ -94,7 +70,41 @@ func verbose(w http.ResponseWriter, r *http.Request) {
 	msg += `"}`
 
 	if _, e := w.Write([]byte(msg)); e != nil {
-		httpd.Error(w, e, "Flush failed")
+		Error(w, e, "Flush failed")
 		return
 	}
+}
+
+// Write msg as error and report e to log
+func Error(w http.ResponseWriter, e error, msg string) {
+	if e != nil {
+		log.Println("%v", e)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	if e := FlushJson(w, Reply(false, msg)); e != nil {
+		panic(e)
+	}
+}
+
+// Write v as string to w
+func FlushJson(w http.ResponseWriter, v interface{}) error {
+	w.Header().Set("Content-Type", "application/json")
+	b, e := json.Marshal(v)
+	if e != nil {
+		return e
+	}
+	if _, e := w.Write(b); e != nil {
+		return e
+	}
+	return nil
+}
+
+type DefaultResponse struct {
+	Status bool   `json:"status"`
+	Text   string `json:"text"`
+}
+
+func Reply(status bool, text string) DefaultResponse {
+	return DefaultResponse{status, text}
 }

@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"radiusd/config"
+
+	"github.com/runner-mei/radiusd/config"
 )
 
 var handlers map[string]func(io.Writer, *Packet)

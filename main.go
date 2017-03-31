@@ -2,13 +2,14 @@ package main
 
 import (
 	"flag"
-	"radiusd/config"
-	"radiusd/radius"
-	"radiusd/sync"
-	S "sync"
+	"sync"
+
+	"github.com/runner-mei/radiusd/config"
+	"github.com/runner-mei/radiusd/queue"
+	"github.com/runner-mei/radiusd/radius"
 )
 
-var wg *S.WaitGroup
+var wg *sync.WaitGroup
 
 func listenAndServe(l config.Listener) {
 	defer wg.Done()
@@ -38,10 +39,7 @@ func main() {
 	flag.Parse()
 
 	if e := config.Init(configPath); e != nil {
-		panic(e)
-	}
-	if e := sync.Init(); e != nil {
-		panic(e)
+		config.Log.Fatal(e)
 	}
 	if config.Verbose {
 		config.Log.Printf("%+v", config.C)
@@ -66,9 +64,9 @@ func main() {
 	radius.HandleFunc(radius.AccountingRequest, 2, acctStop)
 
 	go Control()
-	go sync.Loop()
+	go queue.Loop(config.DB)
 
-	wg = new(S.WaitGroup)
+	wg = new(sync.WaitGroup)
 	for _, listen := range config.C.Listen {
 		wg.Add(1)
 		go listenAndServe(listen)
@@ -76,5 +74,5 @@ func main() {
 	wg.Wait()
 
 	// Write all stats
-	sync.Force()
+	queue.Force(config.DB)
 }

@@ -8,22 +8,22 @@ import (
 )
 
 type Stat struct {
-	InOctet  uint32
-	OutOctet uint32
-	InPacket uint32
+	InOctet   uint32
+	OutOctet  uint32
+	InPacket  uint32
 	OutPacket uint32
 }
 
-var remains map[string]Stat
+var remains map[int64]Stat
 var lock *sync.Mutex
 
 func init() {
-	remains = make(map[string]Stat)
+	remains = make(map[int64]Stat)
 	lock = new(sync.Mutex)
 }
 
 // Add to queue
-func Queue(user string, in uint32, out uint32, inPack uint32, outPack uint32) {
+func Queue(user int64, in uint32, out uint32, inPack uint32, outPack uint32) {
 	lock.Lock()
 	defer lock.Unlock()
 
@@ -40,8 +40,8 @@ func Queue(user string, in uint32, out uint32, inPack uint32, outPack uint32) {
 }
 
 // Empty queue and return anything in it.
-func Flush() map[string]Stat {
-	nw := make(map[string]Stat)
+func Flush() map[int64]Stat {
+	nw := make(map[int64]Stat)
 	lock.Lock()
 
 	out := remains

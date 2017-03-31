@@ -14,135 +14,120 @@
  Date: 12/03/2015 14:22:59 PM
 */
 
-SET NAMES utf8;
-SET FOREIGN_KEY_CHECKS = 0;
-
 -- ----------------------------
---  Table structure for `accounting`
+--  Table structure for `dedicated_addresses`
 -- ----------------------------
-DROP TABLE IF EXISTS `accounting`;
-CREATE TABLE `accounting` (
-  `user` varchar(100) NOT NULL,
-  `date` varchar(16) NOT NULL DEFAULT '' COMMENT '1min consolidated YYYY-MM-DD HH:MM',
-  `hostname` varchar(50) NOT NULL COMMENT 'RadiusD-server for unique key',
-  `bytes_in` bigint(15) unsigned NOT NULL COMMENT 'Octet in',
-  `bytes_out` bigint(15) unsigned NOT NULL COMMENT 'Octet out',
-  `packets_in` int(10) unsigned NOT NULL,
-  `packets_out` int(10) unsigned NOT NULL,
-  PRIMARY KEY (`user`,`date`,`hostname`),
-  CONSTRAINT `fk_accounting_user` FOREIGN KEY (`user`) REFERENCES `user` (`user`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ----------------------------
---  Table structure for `dedi_ip`
--- ----------------------------
-DROP TABLE IF EXISTS `dedi_ip`;
-CREATE TABLE `dedi_ip` (
-  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-  `user_id` int(10) unsigned DEFAULT NULL,
-  `ip` varchar(50) NOT NULL,
-  `time_added` int(10) unsigned NOT NULL,
-  `time_reserved` int(10) unsigned DEFAULT NULL,
-  `time_updated` int(10) unsigned NOT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `unique_ip` (`ip`),
-  UNIQUE KEY `unique_user` (`user_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4;
+DROP TABLE IF EXISTS dedicated_addresses;
+CREATE TABLE dedicated_addresses (
+  id                 SERIAL PRIMARY KEY,
+  user_id            int NULL UNIQUE,
+  address            varchar(50) NOT NULL UNIQUE,
+  time_added         int  NOT NULL,
+  time_reserved      int  DEFAULT NULL,
+  time_updated       int  NOT NULL
+);
 
 -- ----------------------------
 --  Table structure for `dns`
 -- ----------------------------
-DROP TABLE IF EXISTS `dns`;
-CREATE TABLE `dns` (
-  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-  `name` varchar(10) NOT NULL,
-  `one` varchar(50) NOT NULL,
-  `two` varchar(50) NOT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `unique_name` (`name`),
-  UNIQUE KEY `unique_dns` (`one`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+DROP TABLE IF EXISTS dns;
+CREATE TABLE dns (
+  id                 SERIAL PRIMARY KEY,
+  name               varchar(10) NOT NULL UNIQUE,
+  one                varchar(50) NOT NULL UNIQUE,
+  two                varchar(50) NOT NULL
+);
 
 -- ----------------------------
 --  Table structure for `product`
 -- ----------------------------
-DROP TABLE IF EXISTS `product`;
-CREATE TABLE `product` (
-  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-  `product` varchar(50) NOT NULL,
-  `simultaneous_use` int(10) unsigned NOT NULL COMMENT 'Max sessions',
-  `ratelimit_up` int(10) unsigned DEFAULT NULL,
-  `ratelimit_down` int(10) unsigned DEFAULT NULL,
-  `ratelimit_unit` enum('k','M') DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `unique_product` (`product`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ----------------------------
---  Table structure for `session`
--- ----------------------------
-DROP TABLE IF EXISTS `session`;
-CREATE TABLE `session` (
-  `session_id` varchar(20) NOT NULL,
-  `user` varchar(100) NOT NULL,
-  `nas_ip` varchar(50) NOT NULL COMMENT 'VPN Server',
-  `bytes_in` bigint(10) unsigned NOT NULL,
-  `bytes_out` bigint(10) unsigned NOT NULL,
-  `packets_in` bigint(10) unsigned NOT NULL,
-  `packets_out` bigint(10) unsigned NOT NULL,
-  `session_time` bigint(10) unsigned NOT NULL COMMENT 'Session open in sec',
-  `client_ip` varchar(50) NOT NULL,
-  `assigned_ip` varchar(50) NOT NULL,
-  `time_added` int(10) unsigned NOT NULL,
-  PRIMARY KEY (`session_id`,`user`,`nas_ip`),
-  KEY `fk_session_user` (`user`),
-  CONSTRAINT `fk_session_user` FOREIGN KEY (`user`) REFERENCES `user` (`user`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Active connections.';
-
--- ----------------------------
---  Table structure for `session_log`
--- ----------------------------
-DROP TABLE IF EXISTS `session_log`;
-CREATE TABLE `session_log` (
-  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-  `bytes_in` bigint(10) unsigned NOT NULL,
-  `bytes_out` bigint(10) unsigned NOT NULL,
-  `packets_in` bigint(10) unsigned NOT NULL,
-  `packets_out` bigint(10) unsigned NOT NULL,
-  `session_id` varchar(20) NOT NULL,
-  `session_time` bigint(10) unsigned NOT NULL COMMENT 'Session open in sec',
-  `user` varchar(100) NOT NULL,
-  `nas_ip` varchar(50) NOT NULL,
-  `client_ip` varchar(50) NOT NULL,
-  `assigned_ip` varchar(50) NOT NULL,
-  `time_added` int(10) unsigned NOT NULL,
-  PRIMARY KEY (`id`),
-  KEY `fk_session_log_user` (`user`),
-  CONSTRAINT `fk_session_log_user` FOREIGN KEY (`user`) REFERENCES `user` (`user`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Closed connections.';
+DROP TABLE IF EXISTS products;
+CREATE TABLE products (
+  id                 SERIAL PRIMARY KEY,
+  product            varchar(50) NOT NULL UNIQUE,
+  max_sessions       int NOT NULL,
+  ratelimit_up       int NULL,
+  ratelimit_down     int NULL,
+  ratelimit_unit     char NULL
+);
 
 -- ----------------------------
 --  Table structure for `user`
 -- ----------------------------
-DROP TABLE IF EXISTS `user`;
-CREATE TABLE `user` (
-  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-  `user` varchar(100) NOT NULL,
-  `pass` varchar(255) NOT NULL,
-  `block_remaining` bigint(20) unsigned DEFAULT NULL,
-  `active_until` date NULL DEFAULT NULL COMMENT 'Account becomes inactive on given date',
-  `dedicated_ip` varchar(50) DEFAULT NULL COMMENT 'Static IP',
-  `product_id` int(10) unsigned NOT NULL,
-  `dns_id` int(3) unsigned DEFAULT NULL COMMENT 'DNS Pri+Sec',
-  `time_added` int(10) unsigned NOT NULL,
-  `time_updated` int(10) unsigned DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `unique_login` (`user`),
-  UNIQUE KEY `unique_ip` (`dedicated_ip`),
-  KEY `fk_user_product` (`product_id`),
-  KEY `fk_user_dns_1` (`dns_id`),
-  CONSTRAINT `fk_user_dns_1` FOREIGN KEY (`dns_id`) REFERENCES `dns` (`id`),
-  CONSTRAINT `fk_user_product` FOREIGN KEY (`product_id`) REFERENCES `product` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4;
+DROP TABLE IF EXISTS users;
+CREATE TABLE users (
+  id                  SERIAL PRIMARY KEY,
+  username            varchar(100) NOT NULL UNIQUE,
+  password            varchar(255) NOT NULL,
+  block_remaining     bigint NULL,
+  active_until        timestamp with time zone NULL,
+  dedicated_address   varchar(50) NULL UNIQUE,
+  product_id          int NOT NULL REFERENCES products (id),
+  dns_id              int NULL REFERENCES dns (id),
+  created_at          timestamp with time zone NOT NULL,
+  updated_at          timestamp with time zone NOT NULL
+);
 
-SET FOREIGN_KEY_CHECKS = 1;
+COMMENT ON COLUMN users.active_until IS 'Account becomes inactive on given date';
+COMMENT ON COLUMN users.dedicated_address IS 'Static IP';
+COMMENT ON COLUMN users.dns_id IS 'DNS Pri+Sec';
+
+
+
+-- ----------------------------
+--  Table structure for `accounting`
+-- ----------------------------
+DROP TABLE IF EXISTS accounting;
+CREATE TABLE accounting (
+  user_id             int NOT NULL REFERENCES users (id),
+  hostname            varchar(50) NOT NULL,
+  bytes_in            bigint NOT NULL,
+  bytes_out           bigint NOT NULL,
+  packets_in          bigint NOT NULL,
+  packets_out         bigint NOT NULL,
+  created_at          timestamp with time zone NOT NULL,
+  PRIMARY KEY (user_id, created_at, hostname)
+);
+
+COMMENT ON COLUMN accounting.hostname IS 'RadiusD-server for unique key';
+
+-- ----------------------------
+--  Table structure for `session`
+-- ----------------------------
+DROP TABLE IF EXISTS sessions;
+CREATE TABLE sessions (
+  session_id         varchar(20) NOT NULL,
+  user_id            int NOT NULL REFERENCES users (id),
+  nas_address        varchar(50) NOT NULL,
+  bytes_in           bigint NOT NULL,
+  bytes_out          bigint NOT NULL,
+  packets_in         bigint NOT NULL,
+  packets_out        bigint NOT NULL,
+  session_time       bigint NOT NULL,
+  client_address     varchar(50) NOT NULL,
+  assigned_address   varchar(50) NOT NULL,
+  PRIMARY KEY (session_id,user_id,nas_address)
+);
+
+COMMENT ON COLUMN sessions.nas_address IS 'VPN Server';
+COMMENT ON COLUMN sessions.session_time IS 'Session open in sec';
+
+-- ----------------------------
+--  Table structure for `session_log_records`
+-- ----------------------------
+DROP TABLE IF EXISTS session_log_records;
+CREATE TABLE session_log_records (
+  id                 SERIAL PRIMARY KEY,
+  user_id            int NOT NULL REFERENCES users (id),
+  bytes_in           bigint NOT NULL,
+  bytes_out          bigint NOT NULL,
+  packets_in         bigint NOT NULL,
+  packets_out        bigint NOT NULL,
+  session_id         varchar(20) NOT NULL,
+  session_created    timestamp with time zone NOT NULL,
+  nas_address        varchar(50) NOT NULL,
+  client_address     varchar(50) NOT NULL,
+  assigned_address   varchar(50) NOT NULL,
+  created_at         timestamp with time zone NOT NULL
+);
+

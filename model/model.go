@@ -1,70 +1,73 @@
 package model
 
 import (
-	"fmt"
-	"radiusd/config"
-	"time"
 	"database/sql"
+	"fmt"
+	"time"
+
+	"github.com/runner-mei/radiusd/config"
 )
 
 type User struct {
-	Pass            string
+	ID              int64
+	Username        string
+	Password        string
 	ActiveUntil     *string // Account active until YYYY-MM-DD
 	BlockRemain     *int64  // Remaining bandwidth
-	SimultaneousUse uint32 // Max conns allowed
+	SimultaneousUse uint32  // Max conns allowed
 	DedicatedIP     *string
 	Ratelimit       *string
 	DnsOne          *string
 	DnsTwo          *string
 	Ok              bool
 }
-type Session struct {
-	BytesIn     uint32
-	BytesOut    uint32
-	PacketsIn   uint32
-	PacketsOut  uint32
-	SessionID   string
-	SessionTime uint32
-	User        string
-	NasIP       string
-}
-type UserLimits struct {
-	Exists bool
-}
 
-var ErrNoRows = sql.ErrNoRows
-
-func Begin() (*sql.Tx, error) {
-	return config.DB.Begin()
+func UserID(db *sql.DB, user string) (int64, error) {
+	var userID int64
+	e := db.QueryRow(
+		config.PlaceholderFormat(`SELECT
+			id,
+		FROM
+			users
+		WHERE
+			username = ?`),
+		user,
+	).Scan(&userID)
+	if e == config.ErrNoRows {
+		return userID, nil
+	}
+	return userID, e
 }
 
-func Auth(user string) (User, error) {
+func Auth(db *sql.DB, user string) (User, error) {
 	u := User{}
-	e := config.DB.QueryRow(
-		`SELECT
-			pass,
+	e := db.QueryRow(
+		config.PlaceholderFormat(`SELECT
+			id,
+			username,
+			password,
 			block_remaining,
 			active_until,
 			1,
-			simultaneous_use,
-			dedicated_ip,
-			CONCAT(ratelimit_up, ratelimit_unit, '/', ratelimit_down, ratelimit_unit),
+			max_sessions,
+			dedicated_address,
+			CONCAT(products.ratelimit_up, products.ratelimit_unit, '/', products.ratelimit_down, products.ratelimit_unit),
 			dns.one, dns.two
 		FROM
-			user
+			users
 		JOIN
 			product
 		ON
-			user.product_id = product.id
+			users.product_id = products.id
 		LEFT JOIN
 			dns
 		ON
-			user.dns_id = dns.id
+			users.dns_id = dns.id
 		WHERE
-			user = ?`,
+			users.username = ?`),
 		user,
-	).Scan(
-		&u.Pass, &u.BlockRemain, &u.ActiveUntil, &u.Ok,
+	).Scan(&u.ID, &u.Username,
+		&u.Password, &u.BlockRemain, &u.ActiveUntil, &u.Ok,
 		&u.SimultaneousUse, &u.DedicatedIP, &u.Ratelimit,
 		&u.DnsOne, &u.DnsTwo,
 	)
@@ -74,35 +77,65 @@ func Auth(user string) (User, error) {
 	return u, e
 }
 
-func Conns(user string) (uint32, error) {
-	var count uint32 = 0;
-	e := config.DB.QueryRow(
-		`SELECT
+type Session struct {
+	BytesIn     uint32
+	BytesOut    uint32
+	PacketsIn   uint32
+	PacketsOut  uint32
+	SessionID   string
+	User        int64
+	NasIP       string
+	SessionTime uint32
+}
+type UserLimits struct {
+	ID     int64
+	Exists bool
+}
+
+var ErrNoRows = sql.ErrNoRows
+
+func Begin() (*sql.Tx, error) {
+	return config.DB.Begin()
+}
+
+func SessionCount(db *sql.DB, user string) (uint32, error) {
+	var count uint32 = 0
+	e := db.QueryRow(
+		config.PlaceholderFormat(`SELECT
 			COUNT(*)
 		FROM
-			session
+			sessions
 		WHERE
-			user = ?`,
+		  EXISTS (
+		  	SELECT * 
+		  	FROM users 
+		  	WHERE 
+		  		  sessions.user_id == users.id 
+		  		AND 
+		  		  users.username = ?
+		  )
+			`),
 		user,
 	).Scan(&count)
 	return count, e
 }
 
-func Limits(user string) (UserLimits, error) {
+func Limits(db *sql.DB, user string) (UserLimits, error) {
 	u := UserLimits{}
-	e := config.DB.QueryRow(
-		`SELECT
+	e := db.QueryRow(
+		config.PlaceholderFormat(`SELECT
+			users.id,
 			1
 		FROM
-			user
+			users
 		JOIN
-			product
+			products
 		ON
-			user.product_id = product.id
+			users.product_id = products.id
 		WHERE
-			user = ?`,
+			username = ?`),
 		user,
-	).Scan(&u.Exists)
+	).Scan(&u.ID, &u.Exists)
 	return u, e
 }
 
@@ -117,20 +150,20 @@ func affectCheck(res sql.Result, expect int64, errMsg error) error {
 	return nil
 }
 
-func SessionAdd(sessionId, user, nasIp, assignedIp, clientIp string) error {
+func SessionAdd(sessionID string, user int64, nasIp, assignedIp, clientIp string) error {
 	exists := false
 	e := config.DB.QueryRow(
-		`SELECT
+		config.PlaceholderFormat(`SELECT
 			1
 		FROM
-			session
+			sessions
 		WHERE
-			user = ?
+			user_id = ?
 		AND
 			session_id = ?
 		AND
-			nas_ip = ?`,
-		user, sessionId, nasIp,
+			nas_address = ?`),
+		user, sessionID, nasIp,
 	).Scan(&exists)
 	if e != nil && e != sql.ErrNoRows {
 		return e
@@ -141,26 +174,26 @@ func SessionAdd(sessionId, user, nasIp, assignedIp, clientIp string) error {
 	}
 
 	res, e := config.DB.Exec(
-		`INSERT INTO
-			session
-		(session_id, user, time_added, nas_ip, assigned_ip, client_ip, bytes_in, bytes_out, packets_in, packets_out, session_time)
+		config.PlaceholderFormat(`INSERT INTO
+			sessions
+		(session_id, user, time_added, nas_address, assigned_address, client_address, bytes_in, bytes_out, packets_in, packets_out, session_time)
 		VALUES
-		(?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0)`,
-		sessionId, user, time.Now().Unix(), nasIp, assignedIp, clientIp,
+		(?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0)`),
+		sessionID, user, time.Now().Unix(), nasIp, assignedIp, clientIp,
 	)
 	if e != nil {
 		return e
 	}
 	return affectCheck(res, 1, fmt.Errorf(
 		"session.add fail for sess=%s user=%s",
-		sessionId, user,
+		sessionID, user,
 	))
 }
 
 func SessionUpdate(txn *sql.Tx, s Session) error {
 	res, e := txn.Exec(
-		`UPDATE
-			session
+		config.PlaceholderFormat(`UPDATE
+			sessions
 		SET
 			bytes_in = bytes_in + ?,
 			bytes_out = bytes_out + ?,
@@ -170,9 +203,9 @@ func SessionUpdate(txn *sql.Tx, s Session) error {
 		WHERE
 			session_id = ?
 		AND
-			user = ?
+			user_id = ?
 		AND
-			nas_ip = ?`,
+			nas_address = ?`),
 		s.BytesIn, s.BytesOut, s.PacketsIn, s.PacketsOut, s.SessionTime,
 		s.SessionID, s.User, s.NasIP,
 	)
@@ -188,14 +221,14 @@ func SessionUpdate(txn *sql.Tx, s Session) error {
 
 func SessionRemove(txn *sql.Tx, sessionId, user, nasIp string) error {
 	res, e := txn.Exec(
-		`DELETE FROM
+		config.PlaceholderFormat(`DELETE FROM
 			session
 		WHERE
 			session_id = ?
 		AND
 			user = ?
 		AND
-			nas_ip = ?`,
+			nas_ip = ?`),
 		sessionId, user, nasIp,
 	)
 	if e != nil {
@@ -211,7 +244,7 @@ func SessionRemove(txn *sql.Tx, sessionId, user, nasIp string) error {
 // Copy session to log
 func SessionLog(txn *sql.Tx, sessionId string, user string, nasIp string) error {
 	res, e := txn.Exec(
-		`INSERT INTO
+		config.PlaceholderFormat(`INSERT INTO
 			session_log
 			(assigned_ip, bytes_in, bytes_out, client_ip,
 			nas_ip, packets_in, packets_out, session_id,
@@ -227,7 +260,7 @@ func SessionLog(txn *sql.Tx, sessionId string, user string, nasIp string) error 
 		AND
 			user = ?
 		AND
-			nas_ip = ?`,
+			nas_ip = ?`),
 		sessionId, user, nasIp,
 	)
 	if e != nil {
@@ -237,4 +270,78 @@ func SessionLog(txn *sql.Tx, sessionId string, user string, nasIp string) error 
 		"session.log fail for sess=%s",
 		sessionId,
 	))
+}
+
+func SessionAcct(db *sql.DB, user int64, hostname string, octetIn uint32, octetOut uint32, packetIn uint32, packetOut uint32, date time.Time) error {
+	res, e := db.Exec(config.PlaceholderFormat(`INSERT INTO
+			accounting
+		(user_id, hostname, bytes_in, bytes_out, packets_in, packets_out, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`),
+		user, hostname, octetIn, octetOut, packetIn, packetOut, date)
+	if e != nil {
+		return e
+	}
+	affect, e := res.RowsAffected()
+	if e != nil {
+		return e
+	}
+	if affect != 1 {
+		return fmt.Errorf(
+			"Affect fail for user=%s",
+			user,
+		)
+	}
+	return nil
+}
+
+func UpdateRemaining(db *sql.DB, user int64, remain uint32) error {
+	if remain == 0 {
+		return nil
+	}
+
+	res, e := db.Exec(config.PlaceholderFormat(`UPDATE
+			users
+		SET
+			block_remaining = CASE WHEN block_remaining - ? < 0 THEN 0 ELSE block_remaining - ? END
+		WHERE
+			id = ?`), remain, remain, user)
+	if e != nil {
+		return e
+	}
+	affect, e := res.RowsAffected()
+	if e != nil {
+		return e
+	}
+	if affect != 1 {
+		// Nothing changed, check if this behaviour is correct
+		remain, e := checkRemain(db, user)
+		if e != nil {
+			return e
+		}
+		if !remain {
+			return fmt.Errorf(
+				"Affect fail for user=%s",
+				user,
+			)
+		}
+	}
+	return nil
+}
+
+func checkRemain(db *sql.DB, user int64) (bool, error) {
+	var remain *int64
+
+	e := db.QueryRow(
+		config.PlaceholderFormat(`SELECT
+			block_remaining
+		FROM
+			users
+		WHERE
+			username = ?`),
+		user,
+	).Scan(&remain)
+	if remain == nil || *remain == 0 {
+		return true, e
+	}
+	return false, e
 }

@@ -2,27 +2,28 @@
 package main
 
 import (
-	"io"
-	"radiusd/config"
-	"radiusd/model"
-	"radiusd/queue"
-	"radiusd/radius"
-	"radiusd/radius/mschap"
-	"radiusd/radius/vendor"
-	"net"
 	"bytes"
+	"io"
+	"net"
+
+	"github.com/runner-mei/radiusd/config"
+	"github.com/runner-mei/radiusd/model"
+	"github.com/runner-mei/radiusd/queue"
+	"github.com/runner-mei/radiusd/radius"
+	"github.com/runner-mei/radiusd/radius/mschap"
+	"github.com/runner-mei/radiusd/radius/vendor"
 )
 
-func createSess(req *radius.Packet) model.Session {
+func createSession(userID int64, req *radius.Packet) model.Session {
 	return model.Session{
-		BytesIn: radius.DecodeFour(req.Attr(radius.AcctInputOctets)),
-		BytesOut: radius.DecodeFour(req.Attr(radius.AcctOutputOctets)),
-		PacketsIn: radius.DecodeFour(req.Attr(radius.AcctInputPackets)),
-		PacketsOut: radius.DecodeFour(req.Attr(radius.AcctOutputPackets)),
-		SessionID: string(req.Attr(radius.AcctSessionId)),
+		BytesIn:     radius.DecodeFour(req.Attr(radius.AcctInputOctets)),
+		BytesOut:    radius.DecodeFour(req.Attr(radius.AcctOutputOctets)),
+		PacketsIn:   radius.DecodeFour(req.Attr(radius.AcctInputPackets)),
+		PacketsOut:  radius.DecodeFour(req.Attr(radius.AcctOutputPackets)),
+		SessionID:   string(req.Attr(radius.AcctSessionId)),
 		SessionTime: radius.DecodeFour(req.Attr(radius.AcctSessionTime)),
-		User: string(req.Attr(radius.UserName)),
-		NasIP: radius.DecodeIP(req.Attr(radius.NASIPAddress)).String(),
+		User:        userID,
+		NasIP:       radius.DecodeIP(req.Attr(radius.NASIPAddress)).String(),
 	}
 }
 
@@ -34,19 +35,19 @@ func auth(w io.Writer, req *radius.Packet) {
 	reply := []radius.AttrEncoder{}
 
 	user := string(req.Attr(radius.UserName))
-	limits, e := model.Auth(user)
+	limits, e := model.Auth(config.DB, user)
 	if e != nil {
 		config.Log.Printf("auth.begin e=" + e.Error())
 		return
 	}
-	if limits.Pass == "" {
+	if limits.Password == "" {
 		w.Write(radius.DefaultPacket(req, radius.AccessReject, "No such user"))
 		return
 	}
 
 	if req.HasAttr(radius.UserPassword) {
 		pass := radius.DecryptPassword(req.Attr(radius.UserPassword), req)
-		if pass != limits.Pass {
+		if pass != limits.Password {
 			w.Write(radius.DefaultPacket(req, radius.AccessReject, "Invalid password"))
 			return
 		}
@@ -59,7 +60,7 @@ func auth(w io.Writer, req *radius.Packet) {
 
 		// TODO: No challenge then use Request Authenticator
 
-		if !radius.CHAPMatch(limits.Pass, hash, challenge) {
+		if !radius.CHAPMatch(limits.Password, hash, challenge) {
 			w.Write(radius.DefaultPacket(req, radius.AccessReject, "Invalid password"))
 			return
 		}
@@ -73,7 +74,7 @@ func auth(w io.Writer, req *radius.Packet) {
 			if radius.AttributeType(attr.Type()) == radius.VendorSpecific {
 				hdr := radius.VendorSpecificHeader(attr.Bytes())
 				if hdr.VendorId == vendor.Microsoft {
-					attrs[ vendor.AttributeType(hdr.VendorType) ] = attr
+					attrs[vendor.AttributeType(hdr.VendorType)] = attr
 				}
 			}
 		}
@@ -99,13 +100,13 @@ func auth(w io.Writer, req *radius.Packet) {
 				}
 
 				// Check for correctness
-				calc, e := mschap.Encryptv1(challenge, limits.Pass)
+				calc, e := mschap.Encryptv1(challenge, limits.Password)
 				if e != nil {
 					config.Log.Printf("MSCHAPv1: " + e.Error())
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAPv1: Server-side processing error"))
 					return
 				}
-				mppe, e := mschap.Mppev1(limits.Pass)
+				mppe, e := mschap.Mppev1(limits.Password)
 				if e != nil {
 					config.Log.Printf("MPPEv1: " + e.Error())
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MPPEv1: Server-side processing error"))
@@ -127,22 +128,22 @@ func auth(w io.Writer, req *radius.Packet) {
 				}
 
 				reply = append(reply, radius.VendorAttr{
-					Type: radius.VendorSpecific,
+					Type:     radius.VendorSpecific,
 					VendorId: vendor.Microsoft,
 					/* 1 Encryption-Allowed, 2 Encryption-Required */
 					Values: []radius.VendorAttrString{
 						radius.VendorAttrString{
-							Type: vendor.MSMPPEEncryptionPolicy,
+							Type:  vendor.MSMPPEEncryptionPolicy,
 							Value: []byte{0x0, 0x0, 0x0, 0x01},
 						},
 						/* encryption types, allow RC4[40/128bit] */
 						radius.VendorAttrString{
-							Type: vendor.MSMPPEEncryptionTypes,
+							Type:  vendor.MSMPPEEncryptionTypes,
 							Value: []byte{0x0, 0x0, 0x0, 0x06},
 						},
 						/* mppe - encryption negotation key */
 						radius.VendorAttrString{
-							Type: vendor.MSCHAPMPPEKeys,
+							Type:  vendor.MSCHAPMPPEKeys,
 							Value: mppe,
 						},
 					},
@@ -155,13 +156,13 @@ func auth(w io.Writer, req *radius.Packet) {
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAPv2: Flags should be set to 0"))
 					return
 				}
-				enc, e := mschap.Encryptv2(challenge, res.PeerChallenge, user, limits.Pass)
+				enc, e := mschap.Encryptv2(challenge, res.PeerChallenge, user, limits.Password)
 				if e != nil {
 					config.Log.Printf("MSCHAPv2: " + e.Error())
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAPv2: Server-side processing error"))
 					return
 				}
-				send, recv := mschap.Mmpev2(req.Secret(), limits.Pass, req.Auth, res.Response)
+				send, recv := mschap.Mmpev2(req.Secret(), limits.Password, req.Auth, res.Response)
 
 				if bytes.Compare(res.Response, enc.ChallengeResponse) != 0 {
 					if config.Verbose {
@@ -178,32 +179,32 @@ func auth(w io.Writer, req *radius.Packet) {
 				}
 				// TODO: Framed-Protocol = PPP, Framed-Compression = Van-Jacobson-TCP-IP
 				reply = append(reply, radius.VendorAttr{
-					Type: radius.VendorSpecific,
+					Type:     radius.VendorSpecific,
 					VendorId: vendor.Microsoft,
 					Values: []radius.VendorAttrString{
 						/* 1 Encryption-Allowed, 2 Encryption-Required */
 						radius.VendorAttrString{
-							Type: vendor.MSMPPEEncryptionPolicy,
+							Type:  vendor.MSMPPEEncryptionPolicy,
 							Value: []byte{0x0, 0x0, 0x0, 0x01},
 						},
 						/* encryption types, allow RC4[40/128bit] */
 						radius.VendorAttrString{
-							Type: vendor.MSMPPEEncryptionTypes,
+							Type:  vendor.MSMPPEEncryptionTypes,
 							Value: []byte{0x0, 0x0, 0x0, 0x06},
 						},
 						/* success challenge */
 						radius.VendorAttrString{
-							Type: vendor.MSCHAP2Success,
+							Type:  vendor.MSCHAP2Success,
 							Value: append([]byte{byte(res.Ident)}, []byte(enc.AuthenticatorResponse)...),
 						},
 						/* Send-Key */
 						radius.VendorAttrString{
-							Type: vendor.MSMPPESendKey,
+							Type:  vendor.MSMPPESendKey,
 							Value: send,
 						},
 						/* Recv-Key */
 						radius.VendorAttrString{
-							Type: vendor.MSMPPERecvKey,
+							Type:  vendor.MSMPPERecvKey,
 							Value: recv,
 						},
 					},
@@ -216,7 +217,7 @@ func auth(w io.Writer, req *radius.Packet) {
 		}
 	}
 
-	conns, e := model.Conns(user)
+	conns, e := model.SessionCount(config.DB, user)
 	if e != nil {
 		config.Log.Printf("auth.begin e=" + e.Error())
 		return
@@ -237,10 +238,10 @@ func auth(w io.Writer, req *radius.Packet) {
 		if limits.Ratelimit != nil {
 			// 	MT-Rate-Limit = MikrotikRateLimit
 			reply = append(reply, radius.VendorAttr{
-				Type: radius.VendorSpecific,
+				Type:     radius.VendorSpecific,
 				VendorId: vendor.Mikrotik,
 				Values: []radius.VendorAttrString{radius.VendorAttrString{
-					Type: vendor.MikrotikRateLimit,
+					Type:  vendor.MikrotikRateLimit,
 					Value: []byte(*limits.Ratelimit),
 				}},
 			}.Encode())
@@ -249,13 +250,13 @@ func auth(w io.Writer, req *radius.Packet) {
 			// MS-Primary-DNS-Server
 			// MS-Secondary-DNS-Server
 			reply = append(reply, radius.VendorAttr{
-				Type: radius.VendorSpecific,
+				Type:     radius.VendorSpecific,
 				VendorId: vendor.Microsoft,
 				Values: []radius.VendorAttrString{radius.VendorAttrString{
-					Type: vendor.MSPrimaryDNSServer,
+					Type:  vendor.MSPrimaryDNSServer,
 					Value: net.ParseIP(*limits.DnsOne).To4(),
 				}, radius.VendorAttrString{
-					Type: vendor.MSSecondaryDNSServer,
+					Type:  vendor.MSSecondaryDNSServer,
 					Value: net.ParseIP(*limits.DnsTwo).To4(),
 				}},
 			}.Encode())
@@ -289,7 +290,7 @@ func acctBegin(w io.Writer, req *radius.Packet) {
 		config.Log.Printf("acct.begin sess=%s for user=%s on nasIP=%s", sess, user, nasIp)
 	}
 	reply := []radius.AttrEncoder{}
-	_, e := model.Limits(user)
+	userLimits, e := model.Limits(config.DB, user)
 	if e != nil {
 		if e == model.ErrNoRows {
 			config.Log.Printf("acct.begin received invalid user=" + user)
@@ -299,7 +300,7 @@ func acctBegin(w io.Writer, req *radius.Packet) {
 		return
 	}
 
-	if e := model.SessionAdd(sess, user, nasIp, assignedIp, clientIp); e != nil {
+	if e := model.SessionAdd(sess, userLimits.ID, nasIp, assignedIp, clientIp); e != nil {
 		config.Log.Printf("acct.begin e=%s", e.Error())
 		return
 	}
@@ -312,7 +313,13 @@ func acctUpdate(w io.Writer, req *radius.Packet) {
 		return
 	}
 
-	sess := createSess(req)
+	user := string(req.Attr(radius.UserName))
+	userID, e := model.UserID(config.DB, user)
+	if e != nil {
+		config.Log.Printf("acct.update e=" + e.Error())
+		return
+	}
+	sess := createSession(userID, req)
 	if config.Verbose {
 		config.Log.Printf(
 			"acct.update sess=%s for user=%s on NasIP=%s sessTime=%d octetsIn=%d octetsOut=%d",
@@ -359,12 +366,18 @@ func acctStop(w io.Writer, req *radius.Packet) {
 		)
 	}
 
+	userID, e := model.UserID(config.DB, user)
+	if e != nil {
+		config.Log.Printf("acct.update e=" + e.Error())
+		return
+	}
+
+	sessModel := createSession(userID, req)
 	txn, e := model.Begin()
 	if e != nil {
 		config.Log.Printf("acct.update e=" + e.Error())
 		return
 	}
-	sessModel := createSess(req)
 	if e := model.SessionUpdate(txn, sessModel); e != nil {
 		config.Log.Printf("acct.update e=" + e.Error())
 		return
@@ -377,7 +390,7 @@ func acctStop(w io.Writer, req *radius.Packet) {
 		config.Log.Printf("acct.update e=" + e.Error())
 		return
 	}
-	queue.Queue(user, octIn, octOut, packIn, packOut)
+	queue.Queue(userID, octIn, octOut, packIn, packOut)
 	if e := txn.Commit(); e != nil {
 		config.Log.Printf("acct.update e=" + e.Error())
 		return

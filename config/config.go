@@ -1,13 +1,17 @@
 package config
 
 import (
+	"bytes"
 	"database/sql"
-	_ "github.com/go-sql-driver/mysql"
-	"log"
-	"os"
-	"net"
-	"github.com/BurntSushi/toml"
 	"fmt"
+	"log"
+	"net"
+	"os"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
 )
 
 type Listener struct {
@@ -17,21 +21,22 @@ type Listener struct {
 }
 
 type Conf struct {
-	Dsn          string
-	Listen       map[string]Listener
+	Drv           string
+	Dsn           string
+	Listen        map[string]Listener
 	ControlListen string
 }
 
 var (
-	C *Conf
-	Log *log.Logger
-	Debug bool
-	Verbose bool
-	Hostname string
-	DB *sql.DB
+	C         *Conf
+	Log       *log.Logger
+	Debug     bool
+	Verbose   bool
+	Hostname  string
+	DB        *sql.DB
 	ErrNoRows = sql.ErrNoRows
-	Stopping bool
-	Sock []*net.UDPConn
+	Stopping  bool
+	Sock      []*net.UDPConn
 )
 
 func Init(path string) error {
@@ -51,12 +56,8 @@ func Init(path string) error {
 	}
 
 	Log = log.New(os.Stdout, "radiusd ", log.LstdFlags)
-	return dbInit("mysql", C.Dsn)
-}
 
-func dbInit(driver string, dsn string) error {
-	var e error
-	DB, e = sql.Open(driver, dsn)
+	DB, e = sql.Open(C.Drv, C.Dsn)
 	if e != nil {
 		return e
 	}
@@ -66,3 +67,48 @@ func dbInit(driver string, dsn string) error {
 func DbClose() error {
 	return DB.Close()
 }
+
+var (
+	// Question is a PlaceholderFormat instance that leaves placeholders as
+	// question marks.
+	Question = func(sql string) string {
+		return sql
+	}
+
+	// Dollar is a PlaceholderFormat instance that replaces placeholders with
+	// dollar-prefixed positional placeholders (e.g. $1, $2, $3).
+	Dollar = func(sql string) string {
+		buf := &bytes.Buffer{}
+		i := 0
+		for {
+			p := strings.Index(sql, "?")
+			if p == -1 {
+				break
+			}
+
+			if len(sql[p:]) > 1 && sql[p:p+2] == "??" { // escape ?? => ?
+				buf.WriteString(sql[:p])
+				buf.WriteString("?")
+				if len(sql[p:]) == 1 {
+					break
+				}
+				sql = sql[p+2:]
+			} else {
+				i++
+				buf.WriteString(sql[:p])
+				fmt.Fprintf(buf, "$%d", i)
+				sql = sql[p+1:]
+			}
+		}
+
+		buf.WriteString(sql)
+		return buf.String()
+	}
+
+	// PlaceholderFormat takes a SQL statement and replaces each question mark
+	// placeholder with a (possibly different) SQL placeholder.
+	PlaceholderFormat = Dollar
+
+	// IsReturning use returning case in the insert statement.
+	IsReturning bool
+)
