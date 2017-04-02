@@ -49,7 +49,7 @@ func Auth(db *sql.DB, user string) (User, error) {
 			users.block_remaining,
 			users.active_until,
 			1,
-			users.max_sessions,
+			products.max_sessions,
 			users.dedicated_address,
 			CONCAT(products.ratelimit_up, products.ratelimit_unit, '/', products.ratelimit_down, products.ratelimit_unit),
 			dns.one, 

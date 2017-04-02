@@ -30,8 +30,8 @@ type Conf struct {
 var (
 	C         *Conf
 	Log       *log.Logger
-	Debug     bool
-	Verbose   bool
+	Debug     bool = true
+	Verbose   bool = true
 	Hostname  string
 	DB        *sql.DB
 	ErrNoRows = sql.ErrNoRows

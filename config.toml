@@ -4,10 +4,10 @@ ControlListen="127.0.0.1:8124"
 
 [listen]
 	[listen.auth]
-		Addr="127.0.0.1:1812"
-		Secret="secret"
-		CIDR=["127.0.0.1/32"]
+		Addr=":1812"
+		Secret="Tpt8498b2c7"
+		CIDR=["192.168.1.2/24"]
 	[listen.acct]
-		Addr="127.0.0.1:1813"
-		Secret="secret"
-		CIDR=["127.0.0.1/32"]
+		Addr=":1813"
+		Secret="Tpt8498b2c7"
+		CIDR=["192.168.1.2/24"]

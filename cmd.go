@@ -28,8 +28,9 @@ func createSession(userID int64, req *radius.Packet) model.Session {
 }
 
 func auth(w io.Writer, req *radius.Packet) {
+	config.Log.Printf("recv auth packet")
 	if e := radius.ValidateAuthRequest(req); e != "" {
-		config.Log.Printf("auth.begin e=%s", e)
+		config.Log.Printf("auth.begin e=ValidateAuthRequest: %s", e)
 		return
 	}
 	reply := []radius.AttrEncoder{}
@@ -49,7 +50,8 @@ func auth(w io.Writer, req *radius.Packet) {
 	if req.HasAttr(radius.UserPassword) {
 		pass := radius.DecryptPassword(req.Attr(radius.UserPassword), req)
 		if pass != limits.Password {
-			config.Log.Printf("auth.begin e=Invalid password")
+
+			config.Log.Println("auth.begin e=Invalid password, ", pass, limits.Password)
 			w.Write(radius.DefaultPacket(req, radius.AccessReject, "Invalid password"))
 			return
 		}
@@ -108,13 +110,13 @@ func auth(w io.Writer, req *radius.Packet) {
 				// Check for correctness
 				calc, e := mschap.Encryptv1(challenge, limits.Password)
 				if e != nil {
-					config.Log.Printf("MSCHAPv1: " + e.Error())
+					config.Log.Printf("MSCHAPv1: Encryptv1: " + e.Error())
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAPv1: Server-side processing error"))
 					return
 				}
 				mppe, e := mschap.Mppev1(limits.Password)
 				if e != nil {
-					config.Log.Printf("MPPEv1: " + e.Error())
+					config.Log.Printf("MPPEv1: Mppev1: " + e.Error())
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MPPEv1: Server-side processing error"))
 					return
 				}

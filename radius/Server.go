@@ -49,6 +49,7 @@ func Serve(conn *net.UDPConn, secret string, cidrs []string) error {
 	for {
 		n, client, e := conn.ReadFromUDP(buf)
 		if e != nil {
+			config.Log.Println(e)
 			// TODO: Silently ignore?
 			return e
 		}

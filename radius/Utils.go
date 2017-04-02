@@ -80,9 +80,9 @@ func ValidateAuthRequest(p *Packet) string {
 	// attribute or both unless the type of access being requested does
 	// not involve a port or the NAS does not distinguish among its
 	// ports.
-	if !p.HasAttr(NASPort) {
-		return "NASPort missing"
-	}
+	//if !p.HasAttr(NASPort) {
+	//	return "NASPort missing"
+	//}
 	if !p.HasAttr(NASPortType) {
 		return "NASPortType missing"
 	}
