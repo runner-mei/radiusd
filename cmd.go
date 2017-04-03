@@ -41,6 +41,7 @@ func auth(w io.Writer, req *radius.Packet) {
 		return
 	}
 	if limits.Password == "" {
+		config.Log.Printf("auth.begin e=No such user")
 		w.Write(radius.DefaultPacket(req, radius.AccessReject, "No such user"))
 		return
 	}
@@ -48,6 +49,7 @@ func auth(w io.Writer, req *radius.Packet) {
 	if req.HasAttr(radius.UserPassword) {
 		pass := radius.DecryptPassword(req.Attr(radius.UserPassword), req)
 		if pass != limits.Password {
+			config.Log.Printf("auth.begin e=Invalid password")
 			w.Write(radius.DefaultPacket(req, radius.AccessReject, "Invalid password"))
 			return
 		}
@@ -61,6 +63,7 @@ func auth(w io.Writer, req *radius.Packet) {
 		// TODO: No challenge then use Request Authenticator
 
 		if !radius.CHAPMatch(limits.Password, hash, challenge) {
+			config.Log.Printf("auth.begin e=Invalid password")
 			w.Write(radius.DefaultPacket(req, radius.AccessReject, "Invalid password"))
 			return
 		}
@@ -80,6 +83,7 @@ func auth(w io.Writer, req *radius.Packet) {
 		}
 
 		if len(attrs) > 0 && len(attrs) != 2 {
+			config.Log.Printf("auth.begin e=MSCHAP: Missing attrs? MS-CHAP-Challenge/MS-CHAP-Response")
 			w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAP: Missing attrs? MS-CHAP-Challenge/MS-CHAP-Response"))
 			return
 		} else if len(attrs) == 2 {
@@ -91,10 +95,12 @@ func auth(w io.Writer, req *radius.Packet) {
 				if res.Flags == 0 {
 					// If it is zero, the NT-Response field MUST be ignored and
 					// the LM-Response field used.
+					config.Log.Printf("auth.begin e=MSCHAPv1: LM-Response not supported.")
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAPv1: LM-Response not supported."))
 					return
 				}
 				if bytes.Compare(res.LMResponse, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}) != 0 {
+					config.Log.Printf("auth.begin e=MSCHAPv1: LM-Response set.")
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAPv1: LM-Response set."))
 					return
 				}
@@ -153,6 +159,7 @@ func auth(w io.Writer, req *radius.Packet) {
 				// MSCHAPv2
 				res := mschap.DecodeResponse2(attrs[vendor.MSCHAP2Response].Bytes())
 				if res.Flags != 0 {
+					config.Log.Printf("auth.begin e=MSCHAPv2: Flags should be set to 0")
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAPv2: Flags should be set to 0"))
 					return
 				}
@@ -211,6 +218,7 @@ func auth(w io.Writer, req *radius.Packet) {
 				}.Encode())
 
 			} else {
+				config.Log.Printf("auth.begin e=MSCHAP: Response1/2 not found")
 				w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAP: Response1/2 not found"))
 				return
 			}
@@ -223,6 +231,7 @@ func auth(w io.Writer, req *radius.Packet) {
 		return
 	}
 	if conns >= limits.SimultaneousUse {
+		config.Log.Printf("auth.begin e=Max conns reached")
 		w.Write(radius.DefaultPacket(req, radius.AccessReject, "Max conns reached"))
 		return
 	}
@@ -267,6 +276,7 @@ func auth(w io.Writer, req *radius.Packet) {
 		return
 	}
 
+	config.Log.Printf("auth.begin e=Invalid user/pass")
 	w.Write(radius.DefaultPacket(req, radius.AccessReject, "Invalid user/pass"))
 }
 
