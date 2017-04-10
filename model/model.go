@@ -8,6 +8,15 @@ import (
 	"github.com/runner-mei/radiusd/config"
 )
 
+const (
+	users               = "tpt_radius_users"
+	products            = "tpt_radius_products"
+	dns                 = "tpt_radius_dns"
+	accounting          = "tpt_radius_accounting"
+	sessions            = "tpt_radius_sessions"
+	session_log_records = "tpt_radius_session_log_records"
+)
+
 type User struct {
 	ID              int64
 	Username        string
@@ -28,7 +37,7 @@ func UserID(db *sql.DB, user string) (int64, error) {
 		config.PlaceholderFormat(`SELECT
 			id
 		FROM
-			users
+			`+users+`
 		WHERE
 			username = ?`),
 		user,
@@ -55,13 +64,13 @@ func Auth(db *sql.DB, user string) (User, error) {
 			dns.one, 
 			dns.two
 		FROM
-			users
+			`+users+` as users
 		JOIN
-			products
+			`+products+` as products
 		ON
 			users.product_id = products.id
 		LEFT JOIN
-			dns
+			`+dns+` as dns
 		ON
 			users.dns_id = dns.id
 		WHERE
@@ -105,11 +114,11 @@ func SessionCount(db *sql.DB, user string) (uint32, error) {
 		config.PlaceholderFormat(`SELECT
 			COUNT(*)
 		FROM
-			sessions
+			`+sessions+` as sessions
 		WHERE
 		  EXISTS (
 		  	SELECT * 
-		  	FROM users 
+		  	FROM `+users+` as users 
 		  	WHERE 
 		  		  sessions.user_id = users.id 
 		  		AND 
@@ -128,9 +137,9 @@ func Limits(db *sql.DB, user string) (UserLimits, error) {
 			users.id,
 			1
 		FROM
-			users
+			`+users+` as users
 		JOIN
-			products
+			`+products+` as products
 		ON
 			users.product_id = products.id
 		WHERE
@@ -157,7 +166,7 @@ func SessionAdd(db *sql.DB, sessionID string, user int64, nasIP, assignedIP, cli
 		config.PlaceholderFormat(`SELECT
 			1
 		FROM
-			sessions
+			`+sessions+` as sessions
 		WHERE
 			user_id = ?
 		AND
@@ -175,7 +184,7 @@ func SessionAdd(db *sql.DB, sessionID string, user int64, nasIP, assignedIP, cli
 	}
 
 	res, e := db.Exec(
-		config.PlaceholderFormat(`INSERT INTO sessions (
+		config.PlaceholderFormat(`INSERT INTO `+sessions+` (
 		  	session_id, 
 				user_id,  
 				nas_address, 
@@ -202,7 +211,7 @@ func SessionAdd(db *sql.DB, sessionID string, user int64, nasIP, assignedIP, cli
 func SessionUpdate(txn *sql.Tx, s Session) error {
 	res, e := txn.Exec(
 		config.PlaceholderFormat(`UPDATE
-			sessions
+			`+sessions+`
 		SET
 			bytes_in = bytes_in + ?,
 			bytes_out = bytes_out + ?,
@@ -231,7 +240,7 @@ func SessionUpdate(txn *sql.Tx, s Session) error {
 func SessionRemove(txn *sql.Tx, sessionID string, user int64, nasIP string) error {
 	res, e := txn.Exec(
 		config.PlaceholderFormat(`DELETE FROM
-			sessions
+			`+sessions+`
 		WHERE
 			session_id = ?
 		AND
@@ -254,7 +263,7 @@ func SessionRemove(txn *sql.Tx, sessionID string, user int64, nasIP string) erro
 func SessionLog(txn *sql.Tx, sessionID string, user int64, nasIP string) error {
 	res, e := txn.Exec(
 		config.PlaceholderFormat(`INSERT INTO
-			session_log_records
+			`+session_log_records+`
 			(assigned_address, bytes_in, bytes_out, client_address,
 			nas_address, packets_in, packets_out, session_id,
 			session_time, user_id, created_at)
@@ -263,7 +272,7 @@ func SessionLog(txn *sql.Tx, sessionID string, user int64, nasIP string) error {
 			nas_address, packets_in, packets_out, session_id,
 			session_time, user_id, created_at
 		FROM
-			sessions
+			`+sessions+`
 		WHERE
 			session_id = ?
 		AND
@@ -280,10 +289,9 @@ func SessionLog(txn *sql.Tx, sessionID string, user int64, nasIP string) error {
 		sessionID,
 	))
 }
-
 func SessionAcct(db *sql.DB, user int64, hostname string, octetIn uint32, octetOut uint32, packetIn uint32, packetOut uint32, date time.Time) error {
 	res, e := db.Exec(config.PlaceholderFormat(`INSERT INTO
-			accounting
+			`+accounting+`
 		(user_id, hostname, bytes_in, bytes_out, packets_in, packets_out, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`),
 		user, hostname, octetIn, octetOut, packetIn, packetOut, date)
@@ -309,7 +317,7 @@ func UpdateRemaining(db *sql.DB, user int64, remain uint32) error {
 	}
 
 	res, e := db.Exec(config.PlaceholderFormat(`UPDATE
-			users
+			`+users+`
 		SET
 			block_remaining = CASE WHEN block_remaining - ? < 0 THEN 0 ELSE block_remaining - ? END
 		WHERE
@@ -344,7 +352,7 @@ func checkRemain(db *sql.DB, user int64) (bool, error) {
 		config.PlaceholderFormat(`SELECT
 			block_remaining
 		FROM
-			users
+			`+users+`
 		WHERE
 			username = ?`),
 		user,

@@ -17,8 +17,8 @@
 -- ----------------------------
 --  Table structure for `dedicated_addresses`
 -- ----------------------------
-DROP TABLE IF EXISTS dedicated_addresses;
-CREATE TABLE dedicated_addresses (
+DROP TABLE IF EXISTS tpt_radius_dedicated_addresses CASCADE;
+CREATE TABLE tpt_radius_dedicated_addresses (
   id                 SERIAL PRIMARY KEY,
   user_id            int NULL UNIQUE,
   address            varchar(50) NOT NULL UNIQUE,
@@ -30,8 +30,8 @@ CREATE TABLE dedicated_addresses (
 -- ----------------------------
 --  Table structure for `dns`
 -- ----------------------------
-DROP TABLE IF EXISTS dns;
-CREATE TABLE dns (
+DROP TABLE IF EXISTS tpt_radius_dns CASCADE;
+CREATE TABLE tpt_radius_dns (
   id                 SERIAL PRIMARY KEY,
   name               varchar(10) NOT NULL UNIQUE,
   one                varchar(50) NOT NULL UNIQUE,
@@ -41,8 +41,8 @@ CREATE TABLE dns (
 -- ----------------------------
 --  Table structure for `product`
 -- ----------------------------
-DROP TABLE IF EXISTS products;
-CREATE TABLE products (
+DROP TABLE IF EXISTS tpt_radius_products CASCADE;
+CREATE TABLE tpt_radius_products (
   id                 SERIAL PRIMARY KEY,
   product            varchar(50) NOT NULL UNIQUE,
   max_sessions       int NOT NULL,
@@ -54,32 +54,33 @@ CREATE TABLE products (
 -- ----------------------------
 --  Table structure for `user`
 -- ----------------------------
-DROP TABLE IF EXISTS users;
-CREATE TABLE users (
+DROP TABLE IF EXISTS tpt_radius_users CASCADE;
+CREATE TABLE tpt_radius_users (
   id                  SERIAL PRIMARY KEY,
   username            varchar(100) NOT NULL UNIQUE,
   password            varchar(255) NOT NULL,
+  description         text,
   block_remaining     bigint NULL,
   active_until        timestamp with time zone NULL,
   dedicated_address   varchar(50) NULL UNIQUE,
-  product_id          int NOT NULL REFERENCES products (id),
-  dns_id              int NULL REFERENCES dns (id),
+  product_id          int NOT NULL REFERENCES tpt_radius_products (id),
+  dns_id              int NULL REFERENCES tpt_radius_dns (id),
   created_at          timestamp with time zone NOT NULL,
   updated_at          timestamp with time zone NOT NULL
 );
 
-COMMENT ON COLUMN users.active_until IS 'Account becomes inactive on given date';
-COMMENT ON COLUMN users.dedicated_address IS 'Static IP';
-COMMENT ON COLUMN users.dns_id IS 'DNS Pri+Sec';
+COMMENT ON COLUMN tpt_radius_users.active_until IS 'Account becomes inactive on given date';
+COMMENT ON COLUMN tpt_radius_users.dedicated_address IS 'Static IP';
+COMMENT ON COLUMN tpt_radius_users.dns_id IS 'DNS Pri+Sec';
 
 
 
 -- ----------------------------
 --  Table structure for `accounting`
 -- ----------------------------
-DROP TABLE IF EXISTS accounting;
-CREATE TABLE accounting (
-  user_id             int NOT NULL REFERENCES users (id),
+DROP TABLE IF EXISTS tpt_radius_accounting CASCADE;
+CREATE TABLE tpt_radius_accounting (
+  user_id             int NOT NULL REFERENCES tpt_radius_users (id),
   hostname            varchar(50) NOT NULL,
   bytes_in            bigint NOT NULL,
   bytes_out           bigint NOT NULL,
@@ -89,15 +90,15 @@ CREATE TABLE accounting (
   PRIMARY KEY (user_id, created_at, hostname)
 );
 
-COMMENT ON COLUMN accounting.hostname IS 'RadiusD-server for unique key';
+COMMENT ON COLUMN tpt_radius_accounting.hostname IS 'RadiusD-server for unique key';
 
 -- ----------------------------
 --  Table structure for `session`
 -- ----------------------------
-DROP TABLE IF EXISTS sessions;
-CREATE TABLE sessions (
+DROP TABLE IF EXISTS tpt_radius_sessions CASCADE;
+CREATE TABLE tpt_radius_sessions (
   session_id         varchar(20) NOT NULL,
-  user_id            int NOT NULL REFERENCES users (id),
+  user_id            int NOT NULL REFERENCES tpt_radius_users (id),
   nas_address        varchar(50) NOT NULL,
   bytes_in           bigint NOT NULL,
   bytes_out          bigint NOT NULL,
@@ -109,23 +110,22 @@ CREATE TABLE sessions (
   PRIMARY KEY (session_id,user_id,nas_address)
 );
 
-COMMENT ON COLUMN sessions.nas_address IS 'VPN Server';
-COMMENT ON COLUMN sessions.session_time IS 'Session open in sec';
+COMMENT ON COLUMN tpt_radius_sessions.nas_address IS 'VPN Server';
+COMMENT ON COLUMN tpt_radius_sessions.session_time IS 'Session open in sec';
 
 -- ----------------------------
 --  Table structure for `session_log_records`
 -- ----------------------------
-DROP TABLE IF EXISTS session_log_records;
-CREATE TABLE session_log_records (
+DROP TABLE IF EXISTS tpt_radius_session_log_records CASCADE;
+CREATE TABLE tpt_radius_session_log_records (
   id                 SERIAL PRIMARY KEY,
-  user_id            int NOT NULL REFERENCES users (id),
+  session_id         varchar(20) NOT NULL,
+  user_id            int NOT NULL REFERENCES tpt_radius_users (id),
+  nas_address        varchar(50) NOT NULL,
   bytes_in           bigint NOT NULL,
   bytes_out          bigint NOT NULL,
   packets_in         bigint NOT NULL,
   packets_out        bigint NOT NULL,
-  session_id         varchar(20) NOT NULL,
-  session_created    timestamp with time zone NOT NULL,
-  nas_address        varchar(50) NOT NULL,
   client_address     varchar(50) NOT NULL,
   assigned_address   varchar(50) NOT NULL,
   created_at         timestamp with time zone NOT NULL
