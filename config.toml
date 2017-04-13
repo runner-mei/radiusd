@@ -1,13 +1,9 @@
 Drv = "postgres"
-Dsn = "host=127.0.0.1 dbname=tpt_models_test user=tpt password=extreme sslmode=disable"
+Dsn = "host=127.0.0.1 port=35432 dbname=tpt user=tpt password=extreme sslmode=disable"
 ControlListen="127.0.0.1:8124"
 
 [listen]
 	[listen.auth]
 		Addr=":1812"
-		Secret="Tpt8498b2c7"
-		CIDR=["192.168.1.2/24"]
 	[listen.acct]
 		Addr=":1813"
-		Secret="Tpt8498b2c7"
-		CIDR=["192.168.1.2/24"]

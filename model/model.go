@@ -3,12 +3,16 @@ package model
 import (
 	"database/sql"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/runner-mei/radiusd/config"
 )
 
 const (
+	address             = "tpt_network_addresses"
+	device              = "tpt_network_devices"
+	bas                 = "tpt_radius_bas"
 	users               = "tpt_radius_users"
 	products            = "tpt_radius_products"
 	dns                 = "tpt_radius_dns"
@@ -17,13 +21,84 @@ const (
 	session_log_records = "tpt_radius_session_log_records"
 )
 
+type BAS struct {
+	ID       int64
+	DeviceID int64
+	Secret   string
+	VendorID int64
+}
+
+func GetBAS(db *sql.DB, addr net.IP) (*BAS, error) {
+	var id int64
+	var deviceID int64
+	var secret string
+	var vendorID sql.NullInt64
+	// var dnsID sql.NullInt64
+	// var dnsOne sql.NullString
+	// var dnsTwo sql.NullString
+	e := db.QueryRow(
+		config.PlaceholderFormat(`SELECT
+			bas.id,
+			bas.network_device_id,
+			bas.secret,
+			bas.vendor_id
+		FROM
+			`+bas+` as bas
+		WHERE
+		  EXISTS ( SELECT 1
+		  	FROM `+device+`
+		  	WHERE
+		  	    id = bas.network_device_id
+		  	  AND
+			      address = ?)
+			OR EXISTS ( SELECT 1
+		  	FROM `+address+`
+		  	WHERE
+		  	    managed_object_id = bas.network_device_id
+		  	  AND
+			      address = ?)`),
+		addr.String(), addr.String(),
+	).Scan(&id,
+		&deviceID,
+		&secret,
+		&vendorID,
+	// &dnsID,
+	// &dnsOne,
+	// &dnsTwo,
+	)
+	if e != nil {
+		if e == config.ErrNoRows {
+			return nil, nil
+		}
+		return nil, e
+	}
+
+	basData := &BAS{
+		ID:       id,
+		DeviceID: deviceID,
+		Secret:   secret}
+	if vendorID.Valid {
+		basData.VendorID = vendorID.Int64
+	}
+	// if dnsID.Valid {
+	// 	basData.DnsID = dnsID.Int64
+	// }
+	// if dnsOne.Valid {
+	// 	basData.DnsOne = dnsOne.String
+	// }
+	// if dnsTwo.Valid {
+	// 	basData.DnsTwo = dnsTwo.String
+	// }
+	return basData, nil
+}
+
 type User struct {
 	ID              int64
 	Username        string
 	Password        string
 	ActiveUntil     *string // Account active until YYYY-MM-DD
 	BlockRemain     *int64  // Remaining bandwidth
-	SimultaneousUse uint32  // Max conns allowed
+	SimultaneousUse *uint32 // Max conns allowed
 	DedicatedIP     *string
 	Ratelimit       *string
 	DnsOne          *string
@@ -65,7 +140,7 @@ func Auth(db *sql.DB, user string) (User, error) {
 			dns.two
 		FROM
 			`+users+` as users
-		JOIN
+		LEFT JOIN
 			`+products+` as products
 		ON
 			users.product_id = products.id
@@ -76,10 +151,17 @@ func Auth(db *sql.DB, user string) (User, error) {
 		WHERE
 			users.username = ?`),
 		user,
-	).Scan(&u.ID, &u.Username,
-		&u.Password, &u.BlockRemain, &u.ActiveUntil, &u.Ok,
-		&u.SimultaneousUse, &u.DedicatedIP, &u.Ratelimit,
-		&u.DnsOne, &u.DnsTwo,
+	).Scan(&u.ID,
+		&u.Username,
+		&u.Password,
+		&u.BlockRemain,
+		&u.ActiveUntil,
+		&u.Ok,
+		&u.SimultaneousUse,
+		&u.DedicatedIP,
+		&u.Ratelimit,
+		&u.DnsOne,
+		&u.DnsTwo,
 	)
 	if e == config.ErrNoRows {
 		return u, nil
@@ -138,7 +220,7 @@ func Limits(db *sql.DB, user string) (UserLimits, error) {
 			1
 		FROM
 			`+users+` as users
-		JOIN
+		LEFT JOIN
 			`+products+` as products
 		ON
 			users.product_id = products.id
@@ -183,6 +265,7 @@ func SessionAdd(db *sql.DB, sessionID string, user int64, nasIP, assignedIP, cli
 		return nil
 	}
 
+	now := time.Now()
 	res, e := db.Exec(
 		config.PlaceholderFormat(`INSERT INTO `+sessions+` (
 		  	session_id, 
@@ -195,10 +278,11 @@ func SessionAdd(db *sql.DB, sessionID string, user int64, nasIP, assignedIP, cli
 				packets_in, 
 				packets_out, 
 				session_time,
-				created_at
+				created_at,
+				updated_at
 			)
-		VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?)`),
-		sessionID, user, nasIP, assignedIP, clientIP, time.Now())
+		VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?)`),
+		sessionID, user, nasIP, assignedIP, clientIP, now, now)
 	if e != nil {
 		return e
 	}
@@ -217,14 +301,15 @@ func SessionUpdate(txn *sql.Tx, s Session) error {
 			bytes_out = bytes_out + ?,
 			packets_in = packets_in + ?,
 			packets_out = packets_out + ?,
-			session_time = ?
+			session_time = ?,
+			updated_at = ?
 		WHERE
 			session_id = ?
 		AND
 			user_id = ?
 		AND
 			nas_address = ?`),
-		s.BytesIn, s.BytesOut, s.PacketsIn, s.PacketsOut, s.SessionTime,
+		s.BytesIn, s.BytesOut, s.PacketsIn, s.PacketsOut, s.SessionTime, time.Now(),
 		s.SessionID, s.User, s.NasIP,
 	)
 	if e != nil {
@@ -266,11 +351,11 @@ func SessionLog(txn *sql.Tx, sessionID string, user int64, nasIP string) error {
 			`+session_log_records+`
 			(assigned_address, bytes_in, bytes_out, client_address,
 			nas_address, packets_in, packets_out, session_id,
-			session_time, user_id, created_at)
+			session_time, user_id, begin_at, end_at)
 		SELECT
 			assigned_address, bytes_in, bytes_out, client_address,
 			nas_address, packets_in, packets_out, session_id,
-			session_time, user_id, created_at
+			session_time, user_id, created_at as begin_at, updated_at as end_at 
 		FROM
 			`+sessions+`
 		WHERE

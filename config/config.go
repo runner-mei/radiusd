@@ -15,9 +15,9 @@ import (
 )
 
 type Listener struct {
-	Addr   string
-	Secret string
-	CIDR   []string
+	Addr string
+	//Secret string
+	//CIDR   []string
 }
 
 type Conf struct {

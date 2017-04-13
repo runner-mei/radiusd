@@ -2,9 +2,11 @@ package main
 
 import (
 	"flag"
+	"net"
 	"sync"
 
 	"github.com/runner-mei/radiusd/config"
+	"github.com/runner-mei/radiusd/model"
 	"github.com/runner-mei/radiusd/queue"
 	"github.com/runner-mei/radiusd/radius"
 )
@@ -22,7 +24,9 @@ func listenAndServe(l config.Listener) {
 		panic(e)
 	}
 	config.Sock = append(config.Sock, conn)
-	if e := radius.Serve(conn, l.Secret, l.CIDR); e != nil {
+	if e := radius.Serve(conn, func(addr net.IP) (*model.BAS, error) {
+		return model.GetBAS(config.DB, addr)
+	}); e != nil {
 		if config.Stopping {
 			// Ignore close errors
 			return

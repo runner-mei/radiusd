@@ -241,7 +241,6 @@ func auth(w io.Writer, req *radius.Packet) {
 						},
 					},
 				}.Encode())
-
 			} else {
 				if config.Debug {
 					config.Log.Printf("auth.begin e=MSCHAP: Response1/2 not found")
@@ -259,7 +258,7 @@ func auth(w io.Writer, req *radius.Packet) {
 		}
 		return
 	}
-	if conns >= limits.SimultaneousUse {
+	if limits.SimultaneousUse != nil && conns >= *limits.SimultaneousUse {
 		if config.Debug {
 			config.Log.Printf("auth.begin e=Max conns reached")
 		}
@@ -325,12 +324,12 @@ func acctBegin(w io.Writer, req *radius.Packet) {
 
 	user := string(req.Attr(radius.UserName))
 	sess := string(req.Attr(radius.AcctSessionId))
-	nasIp := radius.DecodeIP(req.Attr(radius.NASIPAddress)).String()
-	clientIp := string(req.Attr(radius.CallingStationId))
-	assignedIp := radius.DecodeIP(req.Attr(radius.FramedIPAddress)).String()
+	nasIP := radius.DecodeIP(req.Attr(radius.NASIPAddress)).String()
+	clientIP := string(req.Attr(radius.CallingStationId))
+	assignedIP := radius.DecodeIP(req.Attr(radius.FramedIPAddress)).String()
 
 	if config.Verbose {
-		config.Log.Printf("acct.begin sess=%s for user=%s on nasIP=%s", sess, user, nasIp)
+		config.Log.Printf("acct.begin sess=%s for user=%s on nasIP=%s", sess, user, nasIP)
 	}
 	reply := []radius.AttrEncoder{}
 	userLimits, e := model.Limits(config.DB, user)
@@ -343,7 +342,7 @@ func acctBegin(w io.Writer, req *radius.Packet) {
 		return
 	}
 
-	if e := model.SessionAdd(config.DB, sess, userLimits.ID, nasIp, assignedIp, clientIp); e != nil {
+	if e := model.SessionAdd(config.DB, sess, userLimits.ID, nasIP, assignedIP, clientIP); e != nil {
 		config.Log.Printf("acct.begin e=%s", e.Error())
 		return
 	}
@@ -365,7 +364,7 @@ func acctUpdate(w io.Writer, req *radius.Packet) {
 	sess := createSession(userID, req)
 	if config.Verbose {
 		config.Log.Printf(
-			"acct.update sess=%s for user=%s on NasIP=%s sessTime=%d octetsIn=%d octetsOut=%d",
+			"acct.update sess=%s for user=%s on nasIP=%s sessTime=%d octetsIn=%d octetsOut=%d",
 			sess.SessionID, sess.User, sess.NasIP, sess.SessionTime, sess.BytesIn, sess.BytesOut,
 		)
 	}
@@ -393,7 +392,7 @@ func acctStop(w io.Writer, req *radius.Packet) {
 	}
 	user := string(req.Attr(radius.UserName))
 	sess := string(req.Attr(radius.AcctSessionId))
-	nasIp := radius.DecodeIP(req.Attr(radius.NASIPAddress)).String()
+	nasIP := radius.DecodeIP(req.Attr(radius.NASIPAddress)).String()
 
 	sessTime := radius.DecodeFour(req.Attr(radius.AcctSessionTime))
 	octIn := radius.DecodeFour(req.Attr(radius.AcctInputOctets))
@@ -425,11 +424,11 @@ func acctStop(w io.Writer, req *radius.Packet) {
 		config.Log.Printf("acct.update e=" + e.Error())
 		return
 	}
-	if e := model.SessionLog(txn, sess, userID, nasIp); e != nil {
+	if e := model.SessionLog(txn, sess, userID, nasIP); e != nil {
 		config.Log.Printf("acct.update e=" + e.Error())
 		return
 	}
-	if e := model.SessionRemove(txn, sess, userID, nasIp); e != nil {
+	if e := model.SessionRemove(txn, sess, userID, nasIP); e != nil {
 		config.Log.Printf("acct.update e=" + e.Error())
 		return
 	}

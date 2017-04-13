@@ -9,6 +9,7 @@ import (
 	"net"
 
 	"github.com/runner-mei/radiusd/config"
+	"github.com/runner-mei/radiusd/model"
 )
 
 var handlers map[string]func(io.Writer, *Packet)
@@ -33,16 +34,16 @@ func Listen(addr string) (*net.UDPConn, error) {
 	return net.ListenUDP("udp", udpAddr)
 }
 
-func Serve(conn *net.UDPConn, secret string, cidrs []string) error {
-	var whitelist []*net.IPNet
+func Serve(conn *net.UDPConn, cb func(addr net.IP) (*model.BAS, error)) error {
+	// var whitelist []*net.IPNet
 
-	for _, cidr := range cidrs {
-		_, net, e := net.ParseCIDR(cidr)
-		if e != nil {
-			return e
-		}
-		whitelist = append(whitelist, net)
-	}
+	// for _, cidr := range cidrs {
+	// 	_, net, e := net.ParseCIDR(cidr)
+	// 	if e != nil {
+	// 		return e
+	// 	}
+	// 	whitelist = append(whitelist, net)
+	// }
 
 	buf := make([]byte, 1024)
 	readBuf := new(bytes.Buffer)
@@ -53,22 +54,33 @@ func Serve(conn *net.UDPConn, secret string, cidrs []string) error {
 			// TODO: Silently ignore?
 			return e
 		}
-		ok := false
-		for _, cidr := range whitelist {
-			if cidr.Contains(client.IP) {
-				ok = true
-				break
-			}
+
+		bas, e := cb(client.IP)
+		if e != nil {
+			config.Log.Printf("Request dropped for invalid IP="+client.String(), ",", e)
+			continue
 		}
-		if !ok {
+		if bas == nil {
 			config.Log.Printf("Request dropped for invalid IP=" + client.String())
 			continue
 		}
 
+		// ok := false
+		// for _, cidr := range whitelist {
+		// 	if cidr.Contains(client.IP) {
+		// 		ok = true
+		// 		break
+		// 	}
+		// }
+		// if !ok {
+		// 	config.Log.Printf("Request dropped for invalid IP=" + client.String())
+		// 	continue
+		// }
+
 		if config.Debug {
 			config.Log.Printf("raw.recv: %+v", buf[:n])
 		}
-		p, e := decode(buf, n, secret)
+		p, e := decode(buf, n, bas.Secret)
 		if e != nil {
 			// TODO: Silently ignore decode?
 			return e
