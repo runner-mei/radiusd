@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net"
 	"sync"
 
@@ -12,6 +13,22 @@ import (
 )
 
 var wg *sync.WaitGroup
+
+func init() {
+	radius.WriteRecord = func(r *radius.Record) {
+		var username string
+		if r.Data != nil {
+			if o := r.Data["username"]; o != nil {
+				username = fmt.Sprint(o)
+			}
+		}
+		err := model.AuthReject(config.DB, username, r.Address, r.Code.Message+":"+r.Message)
+		if err != nil {
+			radius.DefaultWriteRecord(r)
+			fmt.Println("AuthReject:", err)
+		}
+	}
+}
 
 func listenAndServe(l config.Listener) {
 	defer wg.Done()

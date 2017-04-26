@@ -1,4 +1,5 @@
 package radius
+
 //go:generate stringer -type=AttributeType
 type AttributeType uint8
 
@@ -15,7 +16,7 @@ const (
 	FramedIPAddress        AttributeType = iota //8
 	FramedIPNetmask        AttributeType = iota //9
 	FramedRouting          AttributeType = iota //10
-	FilterId               AttributeType = iota //11
+	FilterID               AttributeType = iota //11
 	FramedMTU              AttributeType = iota //12
 	FramedCompression      AttributeType = iota //13
 	LoginIPHost            AttributeType = iota //14
@@ -24,7 +25,7 @@ const (
 	_                                    = iota //17 unassigned
 	ReplyMessage           AttributeType = iota //18
 	CallbackNumber         AttributeType = iota //19
-	CallbackId             AttributeType = iota //20
+	CallbackID             AttributeType = iota //20
 	_                                    = iota //21 unassigned
 	FramedRoute            AttributeType = iota //22
 	FramedIPXNetwork       AttributeType = iota //23
@@ -34,8 +35,8 @@ const (
 	SessionTimeout         AttributeType = iota
 	IdleTimeout            AttributeType = iota
 	TerminationAction      AttributeType = iota
-	CalledStationId        AttributeType = iota
-	CallingStationId       AttributeType = iota
+	CalledStationID        AttributeType = iota
+	CallingStationID       AttributeType = iota
 	NASIdentifier          AttributeType = iota
 	ProxyState             AttributeType = iota
 	LoginLATService        AttributeType = iota
@@ -48,13 +49,13 @@ const (
 	AcctDelayTime          AttributeType = iota
 	AcctInputOctets        AttributeType = iota
 	AcctOutputOctets       AttributeType = iota
-	AcctSessionId          AttributeType = iota
+	AcctSessionID          AttributeType = iota
 	AcctAuthentic          AttributeType = iota
 	AcctSessionTime        AttributeType = iota
 	AcctInputPackets       AttributeType = iota
 	AcctOutputPackets      AttributeType = iota
 	AcctTerminateCause     AttributeType = iota
-	AcctMultiSessionId     AttributeType = iota
+	AcctMultiSessionID     AttributeType = iota
 	AcctLinkCount          AttributeType = iota
 	AcctInputGigawords     AttributeType = iota //52
 	AcctOutputGigawords    AttributeType = iota
@@ -92,7 +93,7 @@ const (
 	ARAPChallengeResponse        AttributeType = iota
 	AcctInterimInterval          AttributeType = iota
 	AcctTunnelPacketsLost        AttributeType = iota
-	NASPortId                    AttributeType = iota
+	NASPortID                    AttributeType = iota
 	FramedPool                   AttributeType = iota
 	CUI                          AttributeType = iota
 	TunnelClientAuthID           AttributeType = iota
@@ -101,7 +102,7 @@ const (
 	Unassigned                   AttributeType = iota
 	OriginatingLineInfo          AttributeType = iota
 	NASIPv6Address               AttributeType = iota
-	FramedInterfaceId            AttributeType = iota
+	FramedInterfaceID            AttributeType = iota
 	FramedIPv6Prefix             AttributeType = iota
 	LoginIPv6Host                AttributeType = iota
 	FramedIPv6Route              AttributeType = iota
@@ -140,7 +141,7 @@ const (
 	RequestedLocationInfo        AttributeType = iota
 	FramedManagementProtocol     AttributeType = iota
 	ManagementTransportProtectio AttributeType = iota
-	ManagementPolicyId           AttributeType = iota
+	ManagementPolicyID           AttributeType = iota
 	ManagementPrivilegeLevel     AttributeType = iota
 	PKMSSCert                    AttributeType = iota
 	PKMCACert                    AttributeType = iota

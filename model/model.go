@@ -19,6 +19,7 @@ const (
 	accounting          = "tpt_radius_accounting"
 	sessions            = "tpt_radius_sessions"
 	session_log_records = "tpt_radius_session_log_records"
+	auth_log_records    = "tpt_radius_log_records"
 )
 
 type BAS struct {
@@ -175,6 +176,7 @@ type Session struct {
 	PacketsIn   uint32
 	PacketsOut  uint32
 	SessionID   string
+	NasPort     string
 	User        int64
 	NasIP       string
 	SessionTime uint32
@@ -242,7 +244,21 @@ func affectCheck(res sql.Result, expect int64, errMsg error) error {
 	return nil
 }
 
-func SessionAdd(db *sql.DB, sessionID string, user int64, nasIP, assignedIP, clientIP string) error {
+func AuthReject(db *sql.DB, username, bas, message string) error {
+	_, err := db.Exec(config.PlaceholderFormat(`INSERT INTO `+auth_log_records+`(
+		  	username, 
+				nas_address,  
+				message, 
+				created_at)
+		VALUES (?, ?, ?, ?)`),
+		username, bas, message, time.Now())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func SessionAdd(db *sql.DB, sessionID string, user int64, nasIP, nasPort, assignedIP, clientIP string) error {
 	exists := false
 	e := db.QueryRow(
 		config.PlaceholderFormat(`SELECT
@@ -270,7 +286,8 @@ func SessionAdd(db *sql.DB, sessionID string, user int64, nasIP, assignedIP, cli
 		config.PlaceholderFormat(`INSERT INTO `+sessions+` (
 		  	session_id, 
 				user_id,  
-				nas_address, 
+				nas_address,
+				nas_port,
 				assigned_address, 
 				client_address, 
 				bytes_in, 
@@ -281,13 +298,13 @@ func SessionAdd(db *sql.DB, sessionID string, user int64, nasIP, assignedIP, cli
 				created_at,
 				updated_at
 			)
-		VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?)`),
-		sessionID, user, nasIP, assignedIP, clientIP, now, now)
+		VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?)`),
+		sessionID, user, nasIP, nasPort, assignedIP, clientIP, now, now)
 	if e != nil {
 		return e
 	}
 	return affectCheck(res, 1, fmt.Errorf(
-		"session.add fail for sess=%s user=%s",
+		"session.add fail for sess=%s user=%v",
 		sessionID, user,
 	))
 }
@@ -316,7 +333,7 @@ func SessionUpdate(txn *sql.Tx, s Session) error {
 		return e
 	}
 	return affectCheck(res, 1, fmt.Errorf(
-		"session.update fail for sess=%s user=%s",
+		"session.update fail for sess=%s user=%v",
 		s.SessionID, s.User,
 	))
 
@@ -350,11 +367,11 @@ func SessionLog(txn *sql.Tx, sessionID string, user int64, nasIP string) error {
 		config.PlaceholderFormat(`INSERT INTO
 			`+session_log_records+`
 			(assigned_address, bytes_in, bytes_out, client_address,
-			nas_address, packets_in, packets_out, session_id,
+			nas_address, nas_port, packets_in, packets_out, session_id,
 			session_time, user_id, begin_at, end_at)
 		SELECT
 			assigned_address, bytes_in, bytes_out, client_address,
-			nas_address, packets_in, packets_out, session_id,
+			nas_address, nas_port, packets_in, packets_out, session_id,
 			session_time, user_id, created_at as begin_at, updated_at as end_at 
 		FROM
 			`+sessions+`

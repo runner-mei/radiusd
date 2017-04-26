@@ -5,14 +5,14 @@ import (
 )
 
 func asString(a AttributeType) bool {
-	bytes := map[AttributeType]bool {
-		UserName: true,
-		CallingStationId: true,
-		CalledStationId: true,
-		NASIdentifier: true,
-		ReplyMessage: true,
-		AcctSessionId: true,
-		ConnectInfo: true,
+	bytes := map[AttributeType]bool{
+		UserName:         true,
+		CallingStationID: true,
+		CalledStationID:  true,
+		NASIdentifier:    true,
+		ReplyMessage:     true,
+		AcctSessionID:    true,
+		ConnectInfo:      true,
 	}
 	return bytes[a]
 }

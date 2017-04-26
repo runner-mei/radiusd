@@ -12,13 +12,13 @@ import (
 	"github.com/runner-mei/radiusd/model"
 )
 
-var handlers map[string]func(io.Writer, *Packet)
+var handlers map[string]func(io.Writer, string, interface{}, *Packet)
 
 func init() {
-	handlers = make(map[string]func(io.Writer, *Packet))
+	handlers = make(map[string]func(io.Writer, string, interface{}, *Packet))
 }
 
-func HandleFunc(code PacketCode, statusType int, handler func(io.Writer, *Packet)) {
+func HandleFunc(code PacketCode, statusType int, handler func(io.Writer, string, interface{}, *Packet)) {
 	key := fmt.Sprintf("%d-%d", code, statusType)
 	if _, inuse := handlers[key]; inuse {
 		panic(fmt.Errorf("DevErr: HandleFunc-add for already assigned code=%d", code))
@@ -57,11 +57,11 @@ func Serve(conn *net.UDPConn, cb func(addr net.IP) (*model.BAS, error)) error {
 
 		bas, e := cb(client.IP)
 		if e != nil {
-			config.Log.Printf("Request dropped for invalid IP="+client.String(), ",", e)
+			LogRecord(ErrBASNotFound, client.IP.String(), e.Error()).Save()
 			continue
 		}
 		if bas == nil {
-			config.Log.Printf("Request dropped for invalid IP=" + client.String())
+			LogRecord(ErrBASNotFound, client.IP.String(), ErrBASNotFound.Message).Save()
 			continue
 		}
 
@@ -99,7 +99,7 @@ func Serve(conn *net.UDPConn, cb func(addr net.IP) (*model.BAS, error)) error {
 		key := fmt.Sprintf("%d-%d", p.Code, statusType)
 		handle, ok := handlers[key]
 		if ok {
-			handle(readBuf, p)
+			handle(readBuf, client.IP.String(), bas, p)
 			if config.Debug {
 				config.Log.Printf("raw.send: %+v", readBuf.Bytes())
 			}

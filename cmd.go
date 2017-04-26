@@ -15,34 +15,47 @@ import (
 )
 
 func createSession(userID int64, req *radius.Packet) model.Session {
+	var nasPortID string
+	if req.HasAttr(radius.NASPortID) {
+		nasPortID = string(req.Attr(radius.NASPortID))
+	}
+
 	return model.Session{
 		BytesIn:     radius.DecodeFour(req.Attr(radius.AcctInputOctets)),
 		BytesOut:    radius.DecodeFour(req.Attr(radius.AcctOutputOctets)),
 		PacketsIn:   radius.DecodeFour(req.Attr(radius.AcctInputPackets)),
 		PacketsOut:  radius.DecodeFour(req.Attr(radius.AcctOutputPackets)),
-		SessionID:   string(req.Attr(radius.AcctSessionId)),
+		SessionID:   string(req.Attr(radius.AcctSessionID)),
 		SessionTime: radius.DecodeFour(req.Attr(radius.AcctSessionTime)),
+		NasPort:     nasPortID,
 		User:        userID,
 		NasIP:       radius.DecodeIP(req.Attr(radius.NASIPAddress)).String(),
 	}
 }
 
-func auth(w io.Writer, req *radius.Packet) {
+func auth(w io.Writer, addr string, bas interface{}, req *radius.Packet) {
 	config.Log.Printf("recv auth packet")
-	if e := radius.ValidateAuthRequest(req); e != "" {
+	if err := radius.ValidateAuthRequest(req); err != "" {
 		if config.Debug {
-			config.Log.Printf("auth.begin e=ValidateAuthRequest: %s", e)
+			config.Log.Printf("auth.begin e=ValidateAuthRequest: %s", err)
 		}
+
+		radius.LogRecord(radius.ErrInvalidAuthRequest, addr, err).
+			With("username", string(req.Attr(radius.UserName))).Save()
 		return
 	}
+
 	reply := []radius.AttrEncoder{}
 
 	user := string(req.Attr(radius.UserName))
-	limits, e := model.Auth(config.DB, user)
-	if e != nil {
+	limits, err := model.Auth(config.DB, user)
+	if err != nil {
 		if config.Debug {
-			config.Log.Printf("auth.begin e=" + e.Error())
+			config.Log.Printf("auth.begin e=" + err.Error())
 		}
+
+		radius.LogRecord(radius.ErrDBFail, addr, err.Error()).
+			With("username", user).Save()
 		return
 	}
 	if limits.Password == "" {
@@ -50,6 +63,9 @@ func auth(w io.Writer, req *radius.Packet) {
 			config.Log.Printf("auth.begin e=No such user")
 		}
 		w.Write(radius.DefaultPacket(req, radius.AccessReject, "No such user"))
+
+		radius.LogRecord(radius.ErrUserNotFound, addr, radius.ErrUserNotFound.Message).
+			With("username", user).Save()
 		return
 	}
 
@@ -60,6 +76,10 @@ func auth(w io.Writer, req *radius.Packet) {
 				config.Log.Println("auth.begin e=Invalid password, ", pass, limits.Password)
 			}
 			w.Write(radius.DefaultPacket(req, radius.AccessReject, "Invalid password"))
+
+			radius.LogRecord(radius.ErrUserPasswordNotMatch, addr,
+				radius.ErrUserPasswordNotMatch.Message).
+				With("username", user).Save()
 			return
 		}
 		if config.Verbose {
@@ -76,6 +96,10 @@ func auth(w io.Writer, req *radius.Packet) {
 				config.Log.Printf("auth.begin e=Invalid password")
 			}
 			w.Write(radius.DefaultPacket(req, radius.AccessReject, "Invalid password"))
+
+			radius.LogRecord(radius.ErrUserPasswordNotMatch, addr,
+				radius.ErrUserPasswordNotMatch.Message).
+				With("username", user).Save()
 			return
 		}
 		if config.Verbose {
@@ -98,6 +122,9 @@ func auth(w io.Writer, req *radius.Packet) {
 				config.Log.Printf("auth.begin e=MSCHAP: Missing attrs? MS-CHAP-Challenge/MS-CHAP-Response")
 			}
 			w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAP: Missing attrs? MS-CHAP-Challenge/MS-CHAP-Response"))
+
+			radius.LogRecord(radius.ErrInvalidMSCHAP, addr, "missing attrs").
+				With("username", user).Save()
 			return
 		} else if len(attrs) == 2 {
 			// Collect our data
@@ -112,6 +139,10 @@ func auth(w io.Writer, req *radius.Packet) {
 						config.Log.Printf("auth.begin e=MSCHAPv1: LM-Response not supported.")
 					}
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAPv1: LM-Response not supported."))
+
+					radius.LogRecord(radius.ErrInvalidMSCHAP, addr,
+						"LM-Response not supported").
+						With("username", user).Save()
 					return
 				}
 				if bytes.Compare(res.LMResponse, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}) != 0 {
@@ -119,6 +150,10 @@ func auth(w io.Writer, req *radius.Packet) {
 						config.Log.Printf("auth.begin e=MSCHAPv1: LM-Response set.")
 					}
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAPv1: LM-Response set."))
+
+					radius.LogRecord(radius.ErrInvalidMSCHAP, addr,
+						"LM-Response set").
+						With("username", user).Save()
 					return
 				}
 
@@ -129,6 +164,10 @@ func auth(w io.Writer, req *radius.Packet) {
 						config.Log.Printf("MSCHAPv1: Encryptv1: " + e.Error())
 					}
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAPv1: Server-side processing error"))
+
+					radius.LogRecord(radius.ErrInternalError, addr,
+						"LM-MSCHAPv1: Server-side processing error, "+e.Error()).
+						With("username", user).Save()
 					return
 				}
 				mppe, e := mschap.Mppev1(limits.Password)
@@ -137,6 +176,10 @@ func auth(w io.Writer, req *radius.Packet) {
 						config.Log.Printf("MPPEv1: Mppev1: " + e.Error())
 					}
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MPPEv1: Server-side processing error"))
+
+					radius.LogRecord(radius.ErrInternalError, addr,
+						"LM-MSCHAPv1: Server-side processing error, "+e.Error()).
+						With("username", user).Save()
 					return
 				}
 
@@ -148,6 +191,10 @@ func auth(w io.Writer, req *radius.Packet) {
 						)
 					}
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "Invalid password"))
+
+					radius.LogRecord(radius.ErrUserPasswordNotMatch, addr,
+						radius.ErrUserPasswordNotMatch.Message).
+						With("username", user).Save()
 					return
 				}
 				if config.Verbose {
@@ -184,6 +231,10 @@ func auth(w io.Writer, req *radius.Packet) {
 						config.Log.Printf("auth.begin e=MSCHAPv2: Flags should be set to 0")
 					}
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAPv2: Flags should be set to 0"))
+
+					radius.LogRecord(radius.ErrInternalError, addr,
+						"MSCHAPv2: Flags should be set to 0").
+						With("username", user).Save()
 					return
 				}
 				enc, e := mschap.Encryptv2(challenge, res.PeerChallenge, user, limits.Password)
@@ -192,6 +243,10 @@ func auth(w io.Writer, req *radius.Packet) {
 						config.Log.Printf("MSCHAPv2: Encryptv2: " + e.Error())
 					}
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAPv2: Server-side processing error"))
+
+					radius.LogRecord(radius.ErrInternalError, addr,
+						"MSCHAPv2: Server-side processing error, "+e.Error()).
+						With("username", user).Save()
 					return
 				}
 				send, recv := mschap.Mmpev2(req.Secret(), limits.Password, req.Auth, res.Response)
@@ -204,6 +259,10 @@ func auth(w io.Writer, req *radius.Packet) {
 						)
 					}
 					w.Write(radius.DefaultPacket(req, radius.AccessReject, "Invalid password"))
+
+					radius.LogRecord(radius.ErrUserPasswordNotMatch, addr,
+						radius.ErrUserPasswordNotMatch.Message).
+						With("username", user).Save()
 					return
 				}
 				if config.Verbose {
@@ -246,6 +305,10 @@ func auth(w io.Writer, req *radius.Packet) {
 					config.Log.Printf("auth.begin e=MSCHAP: Response1/2 not found")
 				}
 				w.Write(radius.DefaultPacket(req, radius.AccessReject, "MSCHAP: Response1/2 not found"))
+
+				radius.LogRecord(radius.ErrInternalError, addr,
+					"MSCHAP: Response1/2 not found").
+					With("username", user).Save()
 				return
 			}
 		}
@@ -256,6 +319,9 @@ func auth(w io.Writer, req *radius.Packet) {
 		if config.Debug {
 			config.Log.Printf("auth.begin e=SessionCount: " + e.Error())
 		}
+
+		radius.LogRecord(radius.ErrDBFail, addr, e.Error()).
+			With("username", user).Save()
 		return
 	}
 	if limits.SimultaneousUse != nil && conns >= *limits.SimultaneousUse {
@@ -263,6 +329,9 @@ func auth(w io.Writer, req *radius.Packet) {
 			config.Log.Printf("auth.begin e=Max conns reached")
 		}
 		w.Write(radius.DefaultPacket(req, radius.AccessReject, "Max conns reached"))
+
+		radius.LogRecord(radius.ErrConnectionExceed, addr, radius.ErrConnectionExceed.Message).
+			With("username", user).Save()
 		return
 	}
 
@@ -310,24 +379,21 @@ func auth(w io.Writer, req *radius.Packet) {
 		config.Log.Printf("auth.begin e=Invalid user/pass")
 	}
 	w.Write(radius.DefaultPacket(req, radius.AccessReject, "Invalid user/pass"))
+
+	radius.LogRecord(radius.ErrUserPasswordNotMatch, addr,
+		radius.ErrUserPasswordNotMatch.Message).
+		With("username", user).Save()
 }
 
-func acctBegin(w io.Writer, req *radius.Packet) {
+func acctBegin(w io.Writer, addr string, bas interface{}, req *radius.Packet) {
 	if e := radius.ValidateAcctRequest(req); e != "" {
 		config.Log.Printf("WARN: acct.begin err=" + e)
 		return
 	}
-	if !req.HasAttr(radius.FramedIPAddress) {
-		config.Log.Printf("WARN: acct.begin missing FramedIPAddress")
-		return
-	}
 
-	user := string(req.Attr(radius.UserName))
-	sess := string(req.Attr(radius.AcctSessionId))
+	sess := string(req.Attr(radius.AcctSessionID))
 	nasIP := radius.DecodeIP(req.Attr(radius.NASIPAddress)).String()
-	clientIP := string(req.Attr(radius.CallingStationId))
-	assignedIP := radius.DecodeIP(req.Attr(radius.FramedIPAddress)).String()
-
+	user := string(req.Attr(radius.UserName))
 	if config.Verbose {
 		config.Log.Printf("acct.begin sess=%s for user=%s on nasIP=%s", sess, user, nasIP)
 	}
@@ -342,14 +408,29 @@ func acctBegin(w io.Writer, req *radius.Packet) {
 		return
 	}
 
-	if e := model.SessionAdd(config.DB, sess, userLimits.ID, nasIP, assignedIP, clientIP); e != nil {
+	clientIP := string(req.Attr(radius.CallingStationID))
+	var assignedIP string
+	var nasPort string
+
+	if !req.HasAttr(radius.FramedIPAddress) {
+		config.Log.Printf("WARN: acct.begin missing FramedIPAddress")
+	} else {
+		assignedIP = radius.DecodeIP(req.Attr(radius.FramedIPAddress)).String()
+	}
+
+	if !req.HasAttr(radius.NASPortID) {
+		config.Log.Printf("WARN: acct.begin missing NASPortID")
+	} else {
+		nasPort = string(req.Attr(radius.NASPortID))
+	}
+	if e := model.SessionAdd(config.DB, sess, userLimits.ID, nasIP, nasPort, assignedIP, clientIP); e != nil {
 		config.Log.Printf("acct.begin e=%s", e.Error())
 		return
 	}
 	w.Write(req.Response(radius.AccountingResponse, reply))
 }
 
-func acctUpdate(w io.Writer, req *radius.Packet) {
+func acctUpdate(w io.Writer, addr string, bas interface{}, req *radius.Packet) {
 	if e := radius.ValidateAcctRequest(req); e != "" {
 		config.Log.Printf("acct.update e=" + e)
 		return
@@ -364,8 +445,8 @@ func acctUpdate(w io.Writer, req *radius.Packet) {
 	sess := createSession(userID, req)
 	if config.Verbose {
 		config.Log.Printf(
-			"acct.update sess=%s for user=%s on nasIP=%s sessTime=%d octetsIn=%d octetsOut=%d",
-			sess.SessionID, sess.User, sess.NasIP, sess.SessionTime, sess.BytesIn, sess.BytesOut,
+			"acct.update sess=%s for user=%v on nasIP=%s nasPort=%s sessTime=%d octetsIn=%d octetsOut=%d",
+			sess.SessionID, sess.User, sess.NasIP, sess.NasPort, sess.SessionTime, sess.BytesIn, sess.BytesOut,
 		)
 	}
 	txn, e := model.Begin()
@@ -385,13 +466,13 @@ func acctUpdate(w io.Writer, req *radius.Packet) {
 	w.Write(radius.DefaultPacket(req, radius.AccountingResponse, "Updated accounting."))
 }
 
-func acctStop(w io.Writer, req *radius.Packet) {
+func acctStop(w io.Writer, addr string, bas interface{}, req *radius.Packet) {
 	if e := radius.ValidateAcctRequest(req); e != "" {
 		config.Log.Printf("acct.stop e=" + e)
 		return
 	}
 	user := string(req.Attr(radius.UserName))
-	sess := string(req.Attr(radius.AcctSessionId))
+	sess := string(req.Attr(radius.AcctSessionID))
 	nasIP := radius.DecodeIP(req.Attr(radius.NASIPAddress)).String()
 
 	sessTime := radius.DecodeFour(req.Attr(radius.AcctSessionTime))
