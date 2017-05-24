@@ -1,10 +1,13 @@
 package main
 
 import (
+	"database/sql"
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/runner-mei/radiusd/config"
 	"github.com/runner-mei/radiusd/model"
@@ -26,6 +29,17 @@ func init() {
 		if err != nil {
 			radius.DefaultWriteRecord(r)
 			fmt.Println("AuthReject:", err)
+		}
+	}
+}
+
+func sessionExpire(db *sql.DB) {
+	for range time.Tick(10 * time.Minute) {
+		err := model.SessionExpire(db, time.Now().Add(-30*time.Minute))
+		if err != nil {
+			log.Println("SessionExpire:", err)
+		} else {
+			log.Println("SessionExpire: OK")
 		}
 	}
 }
@@ -86,6 +100,7 @@ func main() {
 
 	go Control()
 	go queue.Loop(config.DB)
+	go sessionExpire(config.DB)
 
 	wg = new(sync.WaitGroup)
 	for _, listen := range config.C.Listen {

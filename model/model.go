@@ -391,6 +391,51 @@ func SessionLog(txn *sql.Tx, sessionID string, user int64, nasIP string) error {
 		sessionID,
 	))
 }
+
+// Copy session to log
+func SessionExpire(db *sql.DB, d time.Time) error {
+	txn, e := db.Begin()
+	if e != nil {
+		return e
+	}
+	defer txn.Rollback()
+
+	res, e := txn.Exec(
+		config.PlaceholderFormat(`INSERT INTO
+			`+session_log_records+`
+			(assigned_address, bytes_in, bytes_out, client_address,
+			nas_address, nas_port, packets_in, packets_out, session_id,
+			session_time, user_id, begin_at, end_at)
+		SELECT
+			assigned_address, bytes_in, bytes_out, client_address,
+			nas_address, nas_port, packets_in, packets_out, session_id,
+			session_time, user_id, created_at as begin_at, updated_at as end_at 
+		FROM
+			`+sessions+`
+		WHERE
+			updated_at < ?`),
+		d,
+	)
+	if e != nil {
+		return e
+	}
+	_, e = res.RowsAffected()
+	if e != nil {
+		return e
+	}
+	res, e = txn.Exec(
+		config.PlaceholderFormat(`DELETE FROM `+sessions+
+			` WHERE updated_at < ?`), d)
+	if e != nil {
+		return e
+	}
+	_, e = res.RowsAffected()
+	if e != nil {
+		return e
+	}
+	return txn.Commit()
+}
+
 func SessionAcct(db *sql.DB, user int64, hostname string, octetIn uint32, octetOut uint32, packetIn uint32, packetOut uint32, date time.Time) error {
 	res, e := db.Exec(config.PlaceholderFormat(`INSERT INTO
 			`+accounting+`
